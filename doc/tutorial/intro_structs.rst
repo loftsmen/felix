@@ -46,7 +46,7 @@ Here is an expanded version of Point:
   }
   var p = Point (1,2); 
   var y = p.norm;
-  p.set(p.x + 1, p.y + 1);
+  &p.set(p.x + 1, p.y + 1);
   
 
 Accessors, with `fun` binder, implicitly get an extra parameter `self`
@@ -67,9 +67,9 @@ The nesting is just syntactic sugar for:
     y: int;
   }
 
-  fun pythag (self: Point) => max(self.x, self.y);
-  proc reset (self: &Point) { self.x <- 0; self.y <- 0; }
-  proc set (self: &Point) (a:int, b:int) { self.x <- a; self.y <- b; } 
+  fun pythag (self:Point) => max(self.x, self.y);
+  proc reset (self:&Point) { self.x <- 0; self.y <- 0; }
+  proc set (self:&Point, a:int, b:int) { self.x <- a; self.y <- b; }
 
 Because of this, the methods are higher order functions and we can form closures
 over objects of type Point:
