@@ -3642,19 +3642,19 @@ open module SDL_events
 @tangle linux_sdl2.fpc
 Name: SDL2 
 Description: Simple Direct Media Layer 2.0
-cflags: -I/usr/local/include/SDL2
+cflags: -I/usr/include/SDL2
 includes: '"SDL.h"'
-provides_dlib: -L/usr/local/lib -lSDL2
-provides_slib: -L/usr/local/lib -lSDL2
+provides_dlib: -L/usr/lib -lSDL2
+provides_slib: -L/usr/lib -lSDL2
 
 @
 @tangle linux_sdl2_image.fpc
 Name: SDL2_image
 Description: Simple Direct Media Layer 2.0: image loader
-cflags: -I/usr/local/include/SDL2
+cflags: -I/usr/include/SDL2
 includes: '"SDL_image.h"'
-provides_dlib: -L/usr/local/lib -lSDL2_image
-provides_slib: -L/usr/local/lib -lSDL2_image
+provides_dlib: -L/usr/lib -lSDL2_image
+provides_slib: -L/usr/lib -lSDL2_image
 requires_dlibs: -ljpeg -ltiff -lpng
 requires_slibs: -ljpeg -ltiff -lpng
 
@@ -3662,10 +3662,10 @@ requires_slibs: -ljpeg -ltiff -lpng
 @tangle linux_sdl2_ttf.fpc
 Name: SDL2_ttf
 Description: Simple Direct Media Layer 2.0: free type interface
-cflags: -I/usr/local/include/SDL2
+cflags: -I/usr/include/SDL2
 includes: '"SDL_ttf.h"'
-provides_dlib: -L/usr/local/lib -lSDL2_ttf
-provides_slib: -L/usr/local/lib -lSDL2_ttf
+provides_dlib: -L/usr/lib -lSDL2_ttf
+provides_slib: -L/usr/lib -lSDL2_ttf
 requires_dlibs: -lfreetype
 requires_slibs: -lfreetype
 
@@ -3673,10 +3673,10 @@ requires_slibs: -lfreetype
 @tangle macosx_sdl2.fpc
 Name: SDL2 
 Description: Simple Direct Media Layer 2.0
-cflags: -I/usr/local/include/SDL2
+cflags: -I/usr/include/SDL2
 includes: '"SDL.h"'
-provides_dlib: -L/usr/local/lib -lSDL2
-provides_slib: -L/usr/local/lib -lSDL2
+provides_dlib: -L/usr/lib -lSDL2
+provides_slib: -L/usr/lib -lSDL2
 requires_dlibs: ---framework=OpenGL
 requires_slibs: ---framework=OpenGL
 
@@ -3684,19 +3684,19 @@ requires_slibs: ---framework=OpenGL
 @tangle macosx_sdl2_image.fpc
 Name: SDL2_image
 Description: Simple Direct Media Layer 2.0: image loader
-cflags: -I/usr/local/include/SDL2
+cflags: -I/usr/include/SDL2
 includes: '"SDL_image.h"'
-provides_dlib: -L/usr/local/lib -lSDL2_image
-provides_slib: -L/usr/local/lib -lSDL2_image
+provides_dlib: -L/usr/lib -lSDL2_image
+provides_slib: -L/usr/lib -lSDL2_image
 
 @
 @tangle macosx_sdl2_ttf.fpc
 Name: SDL2_ttf
 Description: Simple Direct Media Layer 2.0: free type interface
-cflags: -I/usr/local/include/SDL2
+cflags: -I/usr/include/SDL2
 includes: '"SDL_ttf.h"'
-provides_dlib: -L/usr/local/lib -lSDL2_ttf
-provides_slib: -L/usr/local/lib -lSDL2_ttf
+provides_dlib: -L/usr/lib -lSDL2_ttf
+provides_slib: -L/usr/lib -lSDL2_ttf
 requires_dlibs: -lfreetype
 requires_slibs: -lfreetype
 @
@@ -3704,10 +3704,10 @@ requires_slibs: -lfreetype
 @tangle macosx_SDL2_gfx.fpc
 Name: SDL2_gfx
 Description: Simple Direct Media Layer 2.0: SDL2_gfx
-cflags: -I/usr/local/include/SDL2
+cflags: -I/usr/include/SDL2
 includes: '"SDL2_gfxPrimitives.h"'
-provides_dlib: -L/usr/local/lib -lSDL2_gfx
-provides_slib: -L/usr/local/lib -lSDL2_gfx
+provides_dlib: -L/usr/lib -lSDL2_gfx
+provides_slib: -L/usr/lib -lSDL2_gfx
 
 
 @
