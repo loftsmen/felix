@@ -147,16 +147,17 @@ print_endline ("  .. result = " ^ sbt bsym_table result);
 
   | `TYP_rpclt (d,c) -> btyp_cltrref (bt d) (bt c)
   | `TYP_wpclt (d,c) -> btyp_cltwref (bt d) (bt c)
-  | `TYP_defer (sr, tor) -> 
-    begin match !tor with
-    | None -> print_endline ("Bind type: undefined defered type found"); assert false
-    | Some t -> bt t
-    end
 
   | `TYP_rptsum (count, base) ->
     let n = bt count in
     let b = bt base in
     btyp_rptsum (n,b)
+
+
+  | `TYP_compactrptsum (count, base) ->
+    let n = bt count in
+    let b = bt base in
+    btyp_compactrptsum (n,b)
 
   | `TYP_label -> btyp_label ()
   | `TYP_patvar _ -> failwith "Not implemented patvar in typecode"
@@ -322,8 +323,9 @@ print_endline ("Calling Flx_beta.adjust, possibly incorrectly, type = " ^ sbt bs
 
   | `TYP_dual t -> Flx_btype_dual.dual (bt t)
 
-  | `TYP_ellipsis ->
-    failwith "Unexpected `TYP_ellipsis (...) in bind type"
+  | `TYP_ellipsis -> btyp_ellipsis
+    (* failwith "Unexpected `TYP_ellipsis (...) in bind type" *)
+
   | `TYP_none ->
     failwith "Unexpected `TYP_none in bind type"
 
@@ -356,7 +358,7 @@ print_endline ("Flx_bind_type `TYP_var " ^ string_of_int i);
 (*
 print_endline ("FUDGE: Binding `TYP_var " ^ si i ^ ", HACKING KIND TO TYPE");
 *)
-      btyp_type_var (i, Flx_kind.KIND_type)
+      btyp_type_var (i, Flx_kind.KIND_linear)
     end
 
   | `TYP_as (t,s) ->
@@ -408,14 +410,24 @@ print_endline ("Flx_bind_type.TYP_typeof fixpoint metatype hack! Expression " ^ 
     end
 
   | `TYP_array (t1,t2)->
-      let t2 =
-        match bt t2 with
-        | BTYP_tuple [] -> btyp_unitsum 1
-        | x -> x
-      in
-      btyp_array (bt t1, t2)
+      let t1 = bt t1 in
+      let t2 = bt t2 in
+      if not (islinear_type t2) then 
+        clierr sr ("Flx_bind_type.TYP_array] Array index must be compact linear, got " ^ sbt bsym_table t2);
+      btyp_array (t1, t2)
 
+  | `TYP_compactarray (t1,t2)->
+      let t1 = bt t1 in
+      let t2 = bt t2 in
+      if not (islinear_type t2) then 
+        clierr sr ("Flx_bind_type.TYP_compactarray] Compact Array index must be compact linear, got " ^ sbt bsym_table t2);
+      if not (islinear_type t1) then 
+        clierr sr ("Flx_bind_type.TYP_compactarray] Compact Array value type must be compact linear, got " ^ sbt bsym_table t1);
+      btyp_compactarray (t1, t2)
+
+  | `TYP_compacttuple ts -> btyp_compacttuple (List.map bt ts)
   | `TYP_tuple ts -> btyp_tuple (List.map bt ts)
+  | `TYP_intersect ts -> btyp_intersect (List.map bt ts)
   | `TYP_tuple_cons (_,t1,t2) -> btyp_tuple_cons (bt t1) (bt t2)
   | `TYP_tuple_snoc (_,t1,t2) -> btyp_tuple_snoc (bt t1) (bt t2)
   | `TYP_unitsum k ->
@@ -424,6 +436,13 @@ print_endline ("Flx_bind_type.TYP_typeof fixpoint metatype hack! Expression " ^ 
       | 1 -> btyp_tuple []
       | _ -> btyp_unitsum k
       end
+
+  | `TYP_compactsum ts ->
+      let ts' = List.map bt ts in
+      if Flx_btype.all_units ts' then
+        btyp_unitsum (List.length ts)
+      else
+        btyp_compactsum ts'
 
   | `TYP_sum ts ->
       let ts' = List.map bt ts in
@@ -434,6 +453,8 @@ print_endline ("Flx_bind_type.TYP_typeof fixpoint metatype hack! Expression " ^ 
 
   | `TYP_function (d,c) -> btyp_function (bt d, bt c)
   | `TYP_effector (d,e,c) -> btyp_effector (bt d, bt e,bt c)
+  | `TYP_linearfunction (d,c) -> btyp_linearfunction (bt d, bt c)
+  | `TYP_lineareffector (d,e,c) -> btyp_lineareffector (bt d, bt e,bt c)
   | `TYP_cfunction (d,c) -> btyp_cfunction (bt d, bt c)
   | `TYP_pointer t -> btyp_pointer (bt t)
   | `TYP_rref t -> btyp_rref (bt t)
@@ -567,6 +588,10 @@ print_endline ("Binding `TYP_name " ^s^ " via params to " ^ sbt bsym_table t);
           syserr sr ("Synthetic name "^name ^ " is not a nominal type!")
       end
 
+  | `TYP_name (sr,"instancetype",[]) -> 
+(* print_endline ("Trying to bind instancetype"); *)
+     btyp_instancetype sr
+
   | `TYP_name _
   | `TYP_case_tag _
   | `TYP_lookup _
@@ -584,13 +609,13 @@ end;
       let sr2 = src_of_qualified_name x in
       let entry_kind, ts = lookup_qn_in_env' state bsym_table env rs x in
 (*
-if string_of_qualified_name x = "digraph_t" then begin
+if string_of_qualified_name x = "td[int]" then begin
         print_endline ("bind_type': Type "^string_of_typecode t^"=Qualified name "^string_of_qualified_name x^" lookup finds index " ^
           string_of_bid entry_kind.base_sym);
         print_endline ("Kind=" ^ match t with | `TYP_name (_,s,ts) -> "`TYP_name ("^s^"["^catmap ","string_of_typecode ts^"])" | _ -> "`TYP_*");
         print_endline ("spec_vs=" ^
           catmap ","
-            (fun (s,j)-> s ^ "<" ^ string_of_bid j ^ ">")
+            (fun (s,j,k)-> s ^ "<" ^ string_of_bid j ^ ":" ^ Flx_kind.sk k ^ ">")
             entry_kind.spec_vs);
         print_endline ("sub_ts=" ^
           catmap "," (sbt bsym_table) entry_kind.sub_ts);
@@ -643,6 +668,16 @@ end;
       end;
 
       assert (List.length ts = List.length entry_kind.spec_vs);
+      List.iter2 (fun (s,j,k) t ->   
+        let kot = Flx_btype_kind.metatype sr t in
+        if not (Flx_kind.kind_ge2 k kot) then begin 
+          let sr2 = match hfind "lookup" state.sym_table entry_kind.base_sym with {sr=sr2} -> sr2 in
+          clierr2 sr sr2 ("Kinding error binding type " ^ string_of_qualified_name x ^ "\n" ^
+            "Argument type " ^ sbt bsym_table t ^ " has kind " ^ Flx_kind.sk kot ^ "\n" ^ 
+            "which is not a subkind of required kind " ^ Flx_kind.sk k) 
+         end
+      ) entry_kind.spec_vs ts;
+ 
       let t = tsubst sr entry_kind.spec_vs ts baset in
 (*
 if string_of_qualified_name x = "digraph_t" then begin

@@ -573,6 +573,7 @@ assert false
   | `EXPR_rptsum_arg (sr,e) ->
     let (_,t) as e'  = be e in
     begin match t with
+    | BTYP_compactrptsum (n,argt) -> bexpr_rptsum_arg e'
     | BTYP_rptsum (n,argt) -> bexpr_rptsum_arg e'
     | _ -> clierr sr ("Flx_bind_expression: casearg can only be applied to value of repeated sum type (coarray)" ^
       "\ngot: " ^ Flx_btype.st t )
@@ -583,8 +584,10 @@ assert false
     begin match t with
       | BTYP_type_var (_,Flx_kind.KIND_unitsum) 
       | BTYP_unitsum _
+      | BTYP_compactsum _
       | BTYP_sum _
       | BTYP_rptsum _
+      | BTYP_compactrptsum _
       | BTYP_tuple []
       | BTYP_inst (_,_,Flx_kind.KIND_unitsum) -> () 
 
@@ -664,6 +667,7 @@ print_endline ("Evaluating EXPPR_typed_case index=" ^ si v ^ " type=" ^ string_o
     | BTYP_type_var (_,Flx_kind.KIND_unitsum) ->
       bexpr_const_case (v, t)  (* const ctor *)
 
+    | BTYP_compactsum ls
     | BTYP_sum ls ->
       if v<0 || v>= List.length ls
       then clierrx "[flx_bind/flx_lookup.ml:4270: E188] " sr "Case index out of range of sum"
@@ -1061,7 +1065,7 @@ print_endline ("flx_lookup.`EXPR_index3.bexpr_varname");
         env
         e
       with
-      | (Flx_bind_deferred.Simple_module (impl, ts, htab,dirs)) ->
+      | (Flx_eval_module.Simple_module (impl, ts, htab,dirs)) ->
         let env' = Flx_name_lookup.mk_bare_env state.sym_table impl in
         let tables = get_pub_tables state bsym_table env' rs dirs in
         let result = Flx_name_lookup.lookup_name_in_table_dirs htab tables sr name in
@@ -1602,6 +1606,9 @@ print_endline ("Bind_expression general apply " ^ string_of_expr e);
   | `EXPR_remove_fields (sr,e,ss) ->
     bexpr_remove_fields (be e) ss
 
+  | `EXPR_getall_field (sr,e,s) ->
+    bexpr_getall_field (be e) s
+
   | `EXPR_replace_fields (sr, e, fs) ->
     let fs = List.map (fun (s,e) -> s,be e) fs in
     let cmp (s1,e1) (s2,e2) = compare s1 s2 in
@@ -1652,6 +1659,27 @@ print_endline ("Bind_expression general apply " ^ string_of_expr e);
       List.hd bets
     else
     bexpr_tuple (btyp_tuple []) []
+
+  | `EXPR_compacttuple (_,es) ->
+    let bets = List.map be es in
+    let _, bts = List.split bets in
+    let n = List.length bets in
+    if n > 1 then
+      try
+        let t = List.hd bts in
+        List.iter
+        (fun t' -> if t <> t' then raise Not_found)
+        (List.tl bts)
+        ;
+        let t = btyp_compactarray (t, btyp_unitsum n) in
+        bexpr_compacttuple t bets
+      with Not_found ->
+        bexpr_compacttuple (btyp_compacttuple bts) bets
+    else if n = 1 then
+      List.hd bets
+    else
+    bexpr_tuple (btyp_tuple []) []
+
 
 
   | `EXPR_match_case (sr,(v,e)) ->

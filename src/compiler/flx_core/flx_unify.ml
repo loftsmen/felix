@@ -76,22 +76,86 @@ let rec solve_subtypes nominal_subtype counter lhs rhs dvars (s:vassign_t option
   (* here we throw away uniq part of argument type passing a value *)
   | t1, BTYP_uniq t2 -> add_ge (t1,t2)
 
+  (* argument type t must be a subtype of each type of the intersection parameter *)
+  | BTYP_intersect ts, t ->
+    (* print_endline ("Flx_unify: Argument as subtype of intersection parameter, must be subtype of each intersectand"); *)
+    List.iter (fun p -> add_ge (p, t)) ts
+
+  (* this is not right, we can certainly judge this, but we cannot construct
+     an MGU because it involves alternatives, unless there is exactly one match.
+     This is known, principal typing is lost. 
+
+     The correct judgement should be made in the routine "ge" which is not 
+     looking for an MGU
+  *)
+  | t,BTYP_intersect ts -> 
+    (* print_endline ("intersection as subtype of some type "^Flx_btype.st t^ " not implemented yet"); *)
+    raise Not_found
+
   (* arrays and tuples, must be the same length, covariant by element *)
   | BTYP_tuple ls, BTYP_tuple rs ->
-    if List.length ls <> List.length rs then raise Not_found;
-    List.iter2 (fun l r -> add_ge(l,r)) ls rs
+    (* special hack: parameter with trailing ellipsis matchs argument if the 
+       components match, upto the ellipsis, anything after that matches anything
+    *)
+    begin match List.rev ls with
+    | BTYP_ellipsis :: tail ->
+      let prefix = List.rev tail in
+      let n = List.length prefix in
+      (* the number of components in the argument must be greater or equal to the parameter up to the ellipsis *)
+      if List.length rs >= n then 
+        let argprefix = Flx_list.list_prefix ls n in
+        List.iter2 (fun l r -> add_ge(l,r)) prefix argprefix 
+      else raise Not_found
+
+    | _ -> 
+      if List.length ls <> List.length rs then raise Not_found;
+      List.iter2 (fun l r -> add_ge(l,r)) ls rs
+    end
+
+  (* arrays and tuples, must be the same length, covariant by element *)
+  | BTYP_compacttuple ls, BTYP_compacttuple rs ->
+    (* special hack: parameter with trailing ellipsis matchs argument if the 
+       components match, upto the ellipsis, anything after that matches anything
+    *)
+      if List.length ls <> List.length rs then raise Not_found;
+      List.iter2 (fun l r -> add_ge(l,r)) ls rs
+
 
   | BTYP_tuple ls, BTYP_array (r,BTYP_unitsum n) ->
+    begin match List.rev ls with
+    | BTYP_ellipsis :: tail ->
+      let prefix = List.rev tail in
+      let n = List.length prefix in
+      let argprefix = Flx_list.list_prefix ls n in
+      List.iter (fun l -> add_ge(l,r)) prefix
+
+    | _ -> 
+      if List.length ls <> n then raise Not_found;
+      List.iter (fun l -> add_ge(l,r)) ls
+    end
+
+  | BTYP_compacttuple ls, BTYP_compactarray (r,BTYP_unitsum n) ->
     if List.length ls <> n then raise Not_found;
     List.iter (fun l -> add_ge(l,r)) ls
+    
     
   | BTYP_array (l, BTYP_unitsum n), BTYP_tuple rs ->
     if List.length rs <> n then raise Not_found;
     List.iter (fun r -> add_ge(l,r)) rs
+    
+  | BTYP_compactarray (l, BTYP_unitsum n), BTYP_compacttuple rs ->
+    if List.length rs <> n then raise Not_found;
+    List.iter (fun r -> add_ge(l,r)) rs
+
 
   | BTYP_array (l, BTYP_unitsum n), BTYP_array (r, BTYP_unitsum m) ->
     if m <> n then raise Not_found;
     add_ge (l,r)
+
+  | BTYP_compactarray (l, BTYP_unitsum n), BTYP_compactarray (r, BTYP_unitsum m) ->
+    if m <> n then raise Not_found;
+    add_ge (l,r)
+
 
   (* FIXME: these are the ordinary pointer and clt pointer cases
      we had before. There's an obvious generalisation to just require
@@ -129,6 +193,8 @@ let rec solve_subtypes nominal_subtype counter lhs rhs dvars (s:vassign_t option
     (* add_eq (lm,t); *) add_eq (l,t)
 *)
 
+  | BTYP_function (dl,cl), BTYP_linearfunction (dr,cr)
+  | BTYP_linearfunction (dl,cl), BTYP_linearfunction (dr,cr)
   | BTYP_function (dl,cl), BTYP_function (dr,cr) ->
     add_ge (dr, dl); (* contravariant *)
     add_ge (cl, cr) (* covariant *)
@@ -176,6 +242,7 @@ let rec solve_subtypes nominal_subtype counter lhs rhs dvars (s:vassign_t option
 
 and solve_subsumption nominal_subtype counter lhs rhs  dvars (s:vassign_t option ref) (add_eqn:reladd_t) =
       begin match lhs,rhs with
+      | BTYP_instancetype _, BTYP_instancetype _ -> () (* weirdo but we have to do it *)
       | BTYP_rev t1, BTYP_rev t2 ->
         add_eqn (t1,t2)
 
@@ -261,12 +328,15 @@ and solve_subsumption nominal_subtype counter lhs rhs  dvars (s:vassign_t option
         )
         ls
 
+      | BTYP_compactarray (t11, t12), BTYP_compactarray (t21, t22)
       | BTYP_array (t11, t12), BTYP_array (t21, t22)
       | BTYP_function (t11, t12), BTYP_function (t21, t22)
+      | BTYP_linearfunction (t11, t12), BTYP_linearfunction (t21, t22)
       | BTYP_cfunction (t11, t12), BTYP_cfunction (t21, t22) ->
         add_eqn (t11,t21); add_eqn (t12,t22)
 
       (* FIXME *)
+      | BTYP_lineareffector (t11, t12, t13), BTYP_lineareffector (t21, t22, t23)
       | BTYP_effector (t11, t12, t13), BTYP_effector (t21, t22, t23) ->
         add_eqn (t11,t21); add_eqn (t12,t22); add_eqn (t13, t23)
 
@@ -424,7 +494,9 @@ print_endline "Trying to unify instances (2)";
         end
 
       | (BTYP_type_tuple ls1, BTYP_type_tuple ls2)
+      | (BTYP_compacttuple ls1, BTYP_compacttuple ls2)
       | (BTYP_tuple ls1, BTYP_tuple ls2)
+      | (BTYP_compactsum ls1, BTYP_compactsum ls2)
       | (BTYP_sum ls1, BTYP_sum ls2)
         when List.length ls1 = List.length ls2 ->
         begin
@@ -433,6 +505,7 @@ print_endline "Trying to unify instances (2)";
         end
 
       (* repeated sums *)
+      | BTYP_compactrptsum (n1,t1), BTYP_compactrptsum (n2,t2)
       | BTYP_rptsum (n1,t1), BTYP_rptsum (n2,t2) ->
         add_eqn (n1,n2);
         (* FIXME: in Felix, sum types don't support width subtyping,
@@ -613,11 +686,34 @@ let unifies bsym_table counter t1 t2 =
   | None -> false
   | Some _ -> true
 
+let ge' bsym_table counter a b : bool =
+  let eqns = [a,b] in
+  let l,_ = find_vars_eqns eqns in
+  match maybe_specialisation bsym_table counter eqns with
+  | None -> false
+  | Some mgu -> true
+
+(* This adds a judgment that unification can't do because of loss of principal typing:
+
+  if A < X then A & B < X
+
+  In other words, if A is a subtype of X, then adding an extra constraint doesn't hurt.
+
+  For an intersection argument, we try this for each component, in other words
+  if any one of the components is a subtype, the whole intersection is.
+*)
+
+let try_intersection bsym_table counter a b =
+  match b with
+  | BTYP_intersect bs ->
+    List.fold_left (fun acc b -> acc || ge' bsym_table counter a b) false bs
+  | _ -> false
+ 
 let ge bsym_table counter a b : bool =
   let eqns = [a,b] in
   let l,_ = find_vars_eqns eqns in
   match maybe_specialisation bsym_table counter eqns with
-  | None -> (* print_endline "    ** false"; *) false
+  | None -> try_intersection bsym_table counter a b 
   | Some mgu ->
     true
 

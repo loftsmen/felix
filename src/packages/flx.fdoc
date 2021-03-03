@@ -81,14 +81,19 @@ proc print_options(control:control_type) {
     println$ "NOSTDLIB           = "+str control.NOSTDLIB;
     println$ "DEBUG              = "+str control.DEBUG;
     println$ "DEBUG_COMPILER     = "+str control.DEBUG_COMPILER;
-    println$ "STDIMPORTS          = "+str control.STDIMPORTS;
+    println$ "STDIMPORTS         = "+str control.STDIMPORTS;
     println$ "STDGRAMMAR         = "+str control.STDGRAMMAR;
     println$ "IMPORTS            = "+str control.IMPORTS;
     println$ "RECOMPILE          = "+str control.RECOMPILE;
     println$ "FLXG_FORCE         = "+str control.FLXG_FORCE;
-    println$ "ocamls              = "+str control.ocamls;
+    println$ "ocamls             = "+str control.ocamls;
+    println$ "swifts             = "+str control.swifts;
+    println$ "cs                 = "+str control.cs;
     println$ "cpps               = "+str control.cpps;
-    println$ "cppos              = "+str control.cppos;
+    println$ "objcs              = "+str control.objcs;
+    println$ "objcpps            = "+str control.objcpps;
+    println$ "objs               = "+str control.objs;
+    println$ "cppobases          = "+str control.cppobases;
     println$ "TIME               = "+str control.TIME;
     println$ "COMPILER_TIME      = "+str control.COMPILER_TIME;
     println$ "BUNDLE_DIR         = "+str control.BUNDLE_DIR;
@@ -98,6 +103,7 @@ proc print_options(control:control_type) {
     println$ "RUNONLY            = "+str control.RUNONLY;
     println$ "CXXONLY            = "+str control.CXXONLY;
     println$ "OCAMLONLY          = "+str control.OCAMLONLY;
+    println$ "SWIFTONLY          = "+str control.SWIFTONLY;
     println$ "FELIX              = "+str control.FELIX;
     println$ "LINKER_SWITCHES    = "+str control.LINKER_SWITCHES;
     println$ "LINKER_OUTPUT_FILENAME = "+str control.LINKER_OUTPUT_FILENAME;
@@ -137,6 +143,7 @@ fun dflt_control () =>
     var RUNONLY=0;
     var CXXONLY=0;
     var OCAMLONLY=0;
+    var SWIFTONLY=0;
     var ECHO=0;
     var DEBUG_FLX=false;
     var VALIDATE_CACHE=1;
@@ -166,10 +173,15 @@ fun dflt_control () =>
     var LINKER_SWITCHES=Empty[string];
     var MACROS=Empty[string];
 
+    var cs=Empty[string];
     var cpps=Empty[string];
-    var cppos=Empty[string];
+    var objcs=Empty[string];
+    var objcpps=Empty[string];
+    var objs=Empty[string];
+    var cppobases=Empty[string];
 
     var ocamls=Empty[string];
+    var swifts=Empty[string];
 
     var STANDARD_INCLUDE_FILES=Empty[string];
     var EXTRA_INCLUDE_DIRS=Empty[string];
@@ -214,6 +226,7 @@ fun dflt_control () =>
     var INDIR = "";
     var INREGEX = "";
     var NONSTOP = 0;
+    var FANCYLOG= 0;
     var OPTIMISE = list[string]$ "-O1";
     var FLXG_OPTIMISE= 0;
   }
@@ -242,6 +255,7 @@ private proc print_help() {
   println "--target=dir         : subdir of install dir containing target configuration (default 'host')";
   println "--target-dir=dir     : dir containing target configuration (default '$FLX_INSTALL_DIR/host')";
   println "--pkgconfig-path+=dir: prepend extra flx_pkgconfig search directory to standard path";
+  println "--pkg=pkg            : Add pkgconfig package to link";
   println "--toolchain=toolchain: pick a non-default C++ compiler toolchain";
   println "--felix=file         : get installation details from file";
   println "--where              : print location of felix installation";
@@ -257,12 +271,13 @@ private proc print_help() {
   println "--static             : make standalone statically linked executable";
   println "--staticlib          : make standalone library of static objects";
   println "--nofelix            : do not run felix translator, leave C++ outputs alone";
-  println "--nocc               : do not C/C++ compiler; implies --nolink";
+  println "--nocc               : do not C/C++ compile; implies --nolink";
   println "--nolink             : do not link object files to an executable";
   println "--exe                : link executable";
   println "--run-only           : run program without dependency checking or linking";
   println "--c++                : Pure C++ build, no Felix code";
   println "--ocaml              : Pure Ocaml build, no Felix code";
+  println "--swift              : Pure Swift build, no Felix code";
   println "--options            : show option set";
   println "--config             : show configuration";
   println "--version            : show felix version";
@@ -296,6 +311,7 @@ private proc print_help() {
   println "--indir=dir          : set directory for regexp search, default current directory";
   println "--regex=pattern      : Perl regexp for batch file processing";
   println "--nonstop            : don't stop on error in batch processing";
+  println "--fancy-log          : colour log";
   println "--backup             : backup working source tree to dir 'backup'";
   println "--import=file        : add an import which is prefixed to all files being translated";
   println "--import=@file       : add all the files listed in file as imports (recursive on @)";
@@ -311,6 +327,8 @@ private proc print_help() {
   println "-O2                  : add switch to compiler command";
   println "-O3                  : add switch to compiler command";
   println "--cflags=flags       : addd flags to compiler command";
+  println "--obj=objfile_base   : add object to link, adds extension";
+  println "                         so eg fred becomes fred_static.o";
   println "-Dmac                : add macro def to C++ compiler command";
   println "-DFLX_ENABLE_TRACE   : enable compilation of trace generators (defaults off)";
   println "-DFLX_CGOTO          : use gcc indirect gotos and use assembler hack for long jumps (default on if config detects support)";
@@ -407,10 +425,12 @@ proc setup-from-file (debugln: string -> 0)
           control.STDIMPORTS <- data ! control*.STDIMPORTS;
       | "extra-import" => debugln$ "set Felix extra import (in stdlib) "+data; 
           control.IMPORTS <- control*.IMPORTS + data;
+      | "extra-c" => debugln$ "set Felix extra C file "+data; 
+          control.cs <- control*.cs + data;
       | "extra-cpp" => debugln$ "set Felix extra C++ file "+data; 
           control.cpps <- control*.cpps + data;
       | "extra-obj" => debugln$ "set Felix extra object file "+data; 
-          control.cppos <- control*.cppos + data;
+          control.objs <- control*.objs + data;
       | "flx-std-lib" => debugln$ "add Felix standard (cached) library "+data; 
           control.FLX_STD_LIBS <- control*.FLX_STD_LIBS+ data;
       | _ => debugln$ "Unknown field " + field;
@@ -691,7 +711,7 @@ private noinline proc handle_switch
   elif arg == "--help" do
     control.PRINT_HELP <- 1;
 
-  elif arg == "-c" do
+  elif arg == "-c" or arg == "--norun" do
     debugln "Compile program but do not run it";
     control.RUNIT <- 0;
 
@@ -710,7 +730,9 @@ private noinline proc handle_switch
 
   elif arg== "--nolink" do
     debugln "Do not link object code to an executable, just generate and compile the C++ source code; implies -c";
+    control.RUNIT <- 0;
     control.LINKIT <- 0;
+    control.LINKEXE <- 0;
 
   elif arg == "--run-only" do
     debugln "Run the binary executable without any compilation. Must exist!";
@@ -729,7 +751,7 @@ private noinline proc handle_switch
 
   elif prefix(arg,"-D") do
     debugln "Set extra macros for C++ compilation";
-    control.MACROS <- control*.MACROS + arg;
+    control.MACROS <- control*.MACROS + arg.[2 to];
 
   elif arg \in ("-O0", "-O1","-O2","-O3") do
     debugln$ "Set C++ compilation optimisation " + arg;
@@ -746,6 +768,11 @@ private noinline proc handle_switch
       control.EXTRA_CCFLAGS  <-  control*.EXTRA_CCFLAGS + flags;
     };
 
+  elif prefix(arg,"--obj=") do
+    {
+      var file = arg.[6 to];
+      control.cppobases <- control*.cppobases + file; // without suffix or extension, added later!
+    };
   elif prefix(arg,"-W") do
     debugln$ "Set C++ warning switch "+arg;
     control.EXTRA_CCFLAGS  <-  control*.EXTRA_CCFLAGS + arg;
@@ -766,6 +793,11 @@ private noinline proc handle_switch
     control.NONSTOP <- 1;
     debugln$ "Set batch processing mode to nonstop " + control*.NONSTOP;
 
+  elif arg == "--fancy-log" do
+    control.FANCYLOG <- 1;
+    debugln$ "Set diagnostics to Fancy log";
+
+
   elif arg == "--c++" do
     control.CXXONLY <- 1;
     control.FELIX <- 0;
@@ -775,7 +807,12 @@ private noinline proc handle_switch
     control.OCAMLONLY <- 1;
     control.FELIX <- 0;
     debugln$ "Ocaml only, no Felix";
-  
+
+  elif arg == "--swift" do
+    control.SWIFTONLY <- 1;
+    control.FELIX <- 0;
+    debugln$ "Swift only, no Felix";
+   
 // the main filename -- subsequent args are args to flx_run
   else
     eprintln$ "Unknown switch '" + arg+"'";
@@ -805,11 +842,20 @@ private noinline proc handle_filename
   ploopctl.base <- base;
 
   match check_ext $ Filename::get_extension arg with
-  | "compile" => 
+  | "cpp_compile" => 
      control.cpps <- control*.cpps + arg;
 
+  | "c_compile" => 
+     control.cs <- control*.cs + arg;
+
+  | "objcpp_compile" => 
+     control.objcpps <- control*.cpps + arg;
+
+  | "objc_compile" => 
+     control.objcs <- control*.cs + arg;
+
   | "link" =>
-     control.cppos <- control*.cppos + arg;
+     control.objs <- control*.objs + arg;
 
   | "felix" => 
     ploopctl.grab <- 0;
@@ -824,6 +870,10 @@ private noinline proc handle_filename
   | "ocaml" =>
     control.ocamls<- control*.ocamls + arg;
 
+  | "swift" =>
+    control.swifts <- control*.swifts + arg;
+
+
   | _ => assert false;
   endmatch
   ;
@@ -835,14 +885,22 @@ private noinline proc handle_filename
 
 // utility to classify extensions.
 private fun exts () = {
-  var compile_exts = list ('.cpp','.cxx','.c','.cc');
+  var objcpp_compile_exts = list ('.mm');
+  var objc_compile_exts = list ('.m');
+  var cpp_compile_exts = list ('.cpp','.cxx','.cc');
+  var c_compile_exts = list ('.c');
   var ocaml = list ('.mli','.ml','.cmi','cmx','.cmxa');
+  var swift = list ('.swift');
 
   var link_exts =  list ('.o','.obj','.lib','.dll','.a','.so','.dylib','.os');
   var felix_exts = list (".flx",".fdoc");
   var exts =
     map (fun (s:string) => s,"ocaml") ocaml+
-    map (fun (s:string) => s,"compile") compile_exts +
+    map (fun (s:string) => s,"swift") swift+
+    map (fun (s:string) => s,"objcpp_compile") objcpp_compile_exts +
+    map (fun (s:string) => s,"objc_compile") objc_compile_exts +
+    map (fun (s:string) => s,"cpp_compile") cpp_compile_exts +
+    map (fun (s:string) => s,"c_compile") c_compile_exts +
     map (fun (s:string) => s,"link") link_exts +
     map (fun (s:string) => s,"felix") felix_exts + 
     ("","none")
@@ -954,6 +1012,15 @@ noinline proc processing_stage1
     System::exit(0);
   done
 
+  //println$ "AFTER PROCESSING COMMAND LINE SWITCHES, prepend user package dir to flx_pkgconfig search path"; 
+  //println $ "HOME:    Felix home dir is "+config*.FLX_HOME_DIR;
+  //println $ "BASE:    Felix package manager config directories are "+config*.FLX_CONFIG_DIRS.str;
+  //println $ "TARGET:  Felix target subdir  "+control*.FLX_TARGET_SUBDIR;
+var tgt =  control*.FLX_TARGET_SUBDIR;
+tgt = if tgt == "" then "host" else tgt;
+config.FLX_CONFIG_DIRS <- config*.FLX_HOME_DIR / tgt / "config" + config*.FLX_CONFIG_DIRS;
+  //println $ "UPDATED: Felix package manager config directories are "+config*.FLX_CONFIG_DIRS.str;
+
   var xqt = dxqt (control*.ECHO==1 or control*.DEBUG_FLX);
 
   if control*.LINKIT == 0 and control*.STATICLIB == 1 do
@@ -967,10 +1034,15 @@ noinline proc processing_stage1
   debugln "#--------";
   debugln$ "DONE, option index = "+str(xloopctl*.argno);
   debugln$ "path="+xloopctl*.path+": dir="+xloopctl*.dir+",base="+xloopctl*.base+", ext="+xloopctl*.ext;
+  debugln$ "cs="+str control*.cs;
   debugln$ "cpps="+str control*.cpps;
-  debugln$ "cppos="+str control*.cppos;
+  debugln$ "objcs="+str control*.objcs;
+  debugln$ "objcpps="+str control*.objcpps;
+  debugln$ "objs="+str control*.objs;
+  debugln$ "cppobases="+str control*.cppobases;
 
   debugln$ "ocamls="+str control*.ocamls;
+  debugln$ "swifts="+str control*.swifts;
 
 
   // Grab program arguments.
@@ -1688,6 +1760,287 @@ object processing_env(
     done
     return result;
   }
+
+//----------------------------------------------------------------------------
+// OBJC COMPILATION: NOTE HACKED AT THE MOMENT TO USE C TOOLS
+//----------------------------------------------------------------------------
+
+  // objC dynamic (one file)
+  gen objc_compile_dynamic1 (ehandler:1->0) (src:string, dst:string) : int =
+  {
+    var t0 = #Time::time;
+    var pkgs = find_cxx_pkgs src;
+    control&.extra_pkgs <- control.extra_pkgs + pkgs;
+    var pkg_cflags = Empty[string];
+    if pkgs != Empty[string] do 
+      eprintln$ "[flx:objc_compile_dynamic1] Adding packages " + str pkgs;
+      var PKGCONFIG_PATH=map 
+         (fun (s:string) => "--path+="+s) 
+         config.FLX_CONFIG_DIRS
+      ;
+      var allargs = PKGCONFIG_PATH+"--field=cflags"+"--keepleftmost"+pkgs + control.pkgs;
+      var ret,mycflags = FlxPkgConfig::flx_pkgconfig(allargs);
+      if ret != 0 do
+        eprintln$ "[flx:objc_compile_dynamic1] Error " + str ret + " executing flx_pkgconfig, args=" + str allargs;
+        // FIXME
+        //System::exit (1);
+        throw_continuation ehandler;
+      done
+      pkg_cflags = mycflags;
+    done
+    var tc = toolchain_maker
+      extend dflt_toolchain_config with 
+      (
+        ccflags = /* ccflags + */ control.CCFLAGS + pkg_cflags,
+        header_search_dirs = config.FLX_RTL_DIRS+control.EXTRA_INCLUDE_DIRS,
+        macros = control.MACROS,
+        debugln = if control.ECHO==1 then echoln[string] else debugln[string] endif
+      )
+      end
+    ;
+    if control.RECOMPILE==1 or not c_depcheck (tc,src,dst) do
+      var result = tc.c_dynamic_object_compiler (dst=dst,src=src);
+      showtime("Dynamic objc  : "+src, t0);
+      return result;
+    else
+      return 0;
+    done
+  }
+
+  // objC static (one file)
+  gen objc_compile_static1 (ehandler:1->0) (src: string, dst: string) : int = 
+  {
+//println$ "objc_compile_static1: " + src " -> " + dst;
+    var t0 = #Time::time;
+    var pkgs = find_cxx_pkgs src;
+    control&.extra_pkgs <- control.extra_pkgs + pkgs;
+    var pkg_cflags = Empty[string];
+    if pkgs != Empty[string] do 
+      eprintln$ "[flx:objc_compile_static1] Adding packages " + str pkgs;
+      var PKGCONFIG_PATH=map 
+         (fun (s:string) => "--path+="+s) 
+         config.FLX_CONFIG_DIRS
+      ;
+      var allargs = PKGCONFIG_PATH+"--field=cflags"+"--keepleftmost"+pkgs+control.pkgs;
+      var ret,mycflags = FlxPkgConfig::flx_pkgconfig(allargs);
+      if ret != 0 do
+        eprintln$ "[flx:objc_compile_static1] Error " + str ret + " executing flx_pkgconfig, args=" + str allargs;
+        // FIXME
+        System::exit (1);
+      done
+      pkg_cflags = mycflags;
+    done
+ 
+    var tc = toolchain_maker  
+      extend dflt_toolchain_config with 
+      (
+        ccflags = /*ccflags + */ control.CCFLAGS + pkg_cflags,
+        header_search_dirs = config.FLX_RTL_DIRS+control.EXTRA_INCLUDE_DIRS,
+        macros = control.MACROS,
+        debugln = if control.ECHO==1 then echoln[string] else debugln[string] endif
+      )
+      end
+    ;
+    if control.RECOMPILE==1 or not c_depcheck (tc,src,dst) do
+      var result = tc.c_static_object_compiler (dst=dst,src=src); 
+      showtime("Static objc     : "+src,t0);
+      if result != 0 do
+        eprintln$ "[flx] objC compilation "+src+" failed";
+      done
+      return result;
+    else
+      return 0;
+    done
+
+  }
+
+//----------------------------------------------------------------------------
+// C COMPILATION
+//----------------------------------------------------------------------------
+
+  // C dynamic (one file)
+  gen c_compile_dynamic1 (ehandler:1->0) (src:string, dst:string) : int =
+  {
+    var t0 = #Time::time;
+    var pkgs = find_cxx_pkgs src;
+    control&.extra_pkgs <- control.extra_pkgs + pkgs;
+    var pkg_cflags = Empty[string];
+    if pkgs != Empty[string] do 
+      eprintln$ "[flx:c_compile_dynamic1] Adding packages " + str pkgs;
+      var PKGCONFIG_PATH=map 
+         (fun (s:string) => "--path+="+s) 
+         config.FLX_CONFIG_DIRS
+      ;
+      var allargs = PKGCONFIG_PATH+"--field=cflags"+"--keepleftmost"+pkgs + control.pkgs;
+      var ret,mycflags = FlxPkgConfig::flx_pkgconfig(allargs);
+      if ret != 0 do
+        eprintln$ "[flx:c_compile_dynamic1] Error " + str ret + " executing flx_pkgconfig, args=" + str allargs;
+        // FIXME
+        //System::exit (1);
+        throw_continuation ehandler;
+      done
+      pkg_cflags = mycflags;
+    done
+    var tc = toolchain_maker
+      extend dflt_toolchain_config with 
+      (
+        ccflags = /* ccflags + */ control.CCFLAGS + pkg_cflags,
+        header_search_dirs = config.FLX_RTL_DIRS+control.EXTRA_INCLUDE_DIRS,
+        macros = control.MACROS,
+        debugln = if control.ECHO==1 then echoln[string] else debugln[string] endif
+      )
+      end
+    ;
+    if control.RECOMPILE==1 or not c_depcheck (tc,src,dst) do
+      var result = tc.c_dynamic_object_compiler (dst=dst,src=src);
+      showtime("Dynamic c  : "+src, t0);
+      return result;
+    else
+      return 0;
+    done
+  }
+
+  // C static (one file)
+  gen c_compile_static1 (ehandler:1->0) (src: string, dst: string) : int = 
+  {
+//println$ "c_compile_static1: " + src " -> " + dst;
+    var t0 = #Time::time;
+    var pkgs = find_cxx_pkgs src;
+    control&.extra_pkgs <- control.extra_pkgs + pkgs;
+    var pkg_cflags = Empty[string];
+    if pkgs != Empty[string] do 
+      eprintln$ "[flx:c_compile_static1] Adding packages " + str pkgs;
+      var PKGCONFIG_PATH=map 
+         (fun (s:string) => "--path+="+s) 
+         config.FLX_CONFIG_DIRS
+      ;
+      var allargs = PKGCONFIG_PATH+"--field=cflags"+"--keepleftmost"+pkgs+control.pkgs;
+      var ret,mycflags = FlxPkgConfig::flx_pkgconfig(allargs);
+      if ret != 0 do
+        eprintln$ "[flx:c_compile_static1] Error " + str ret + " executing flx_pkgconfig, args=" + str allargs;
+        // FIXME
+        System::exit (1);
+      done
+      pkg_cflags = mycflags;
+    done
+ 
+    var tc = toolchain_maker  
+      extend dflt_toolchain_config with 
+      (
+        ccflags = /*ccflags + */ control.CCFLAGS + pkg_cflags,
+        header_search_dirs = config.FLX_RTL_DIRS+control.EXTRA_INCLUDE_DIRS,
+        macros = control.MACROS,
+        debugln = if control.ECHO==1 then echoln[string] else debugln[string] endif
+      )
+      end
+    ;
+    if control.RECOMPILE==1 or not c_depcheck (tc,src,dst) do
+      var result = tc.c_static_object_compiler (dst=dst,src=src); 
+      showtime("Static c     : "+src,t0);
+      if result != 0 do
+        eprintln$ "[flx] C compilation "+src+" failed";
+      done
+      return result;
+    else
+      return 0;
+    done
+
+  }
+
+//----------------------------------------------------------------------------
+// ObjC++ COMPILATION : NOTE HACKED AT THE MOMENT TO USE C TOOLS
+//----------------------------------------------------------------------------
+
+  // C++ dynamic (one file)
+  gen objcxx_compile_dynamic1 (ehandler:1->0) (src:string, dst:string) : int =
+  {
+    var t0 = #Time::time;
+    var pkgs = find_cxx_pkgs src;
+    control&.extra_pkgs <- control.extra_pkgs + pkgs;
+    var pkg_cflags = Empty[string];
+    if pkgs != Empty[string] do 
+      eprintln$ "[flx:objcxx_compile_dynamic1] Adding packages " + str pkgs;
+      var PKGCONFIG_PATH=map 
+         (fun (s:string) => "--path+="+s) 
+         config.FLX_CONFIG_DIRS
+      ;
+      var allargs = PKGCONFIG_PATH+"--field=cflags"+"--keepleftmost"+pkgs + control.pkgs;
+      var ret,mycflags = FlxPkgConfig::flx_pkgconfig(allargs);
+      if ret != 0 do
+        eprintln$ "[flx:objcxx_compile_dynamic1] Error " + str ret + " executing flx_pkgconfig, args=" + str allargs;
+        // FIXME
+        //System::exit (1);
+        throw_continuation ehandler;
+      done
+      pkg_cflags = mycflags;
+    done
+    var tc = toolchain_maker
+      extend dflt_toolchain_config with 
+      (
+        ccflags = /* ccflags + */ control.CCFLAGS + pkg_cflags,
+        header_search_dirs = config.FLX_RTL_DIRS+control.EXTRA_INCLUDE_DIRS,
+        macros = control.MACROS,
+        debugln = if control.ECHO==1 then echoln[string] else debugln[string] endif
+      )
+      end
+    ;
+    if control.RECOMPILE==1 or not cxx_depcheck (tc,src,dst) do
+      var result = tc.cxx_dynamic_object_compiler (dst=dst,src=src);
+      showtime("Dynamic objc++  : "+src, t0);
+      return result;
+    else
+      return 0;
+    done
+  }
+
+  // ObjC++ static (one files)
+  gen objcxx_compile_static1 (ehandler:1->0) (src: string, dst: string) : int = 
+  {
+//println$ "objcxx_compile_static1: " + src " -> " + dst;
+    var t0 = #Time::time;
+    var pkgs = find_cxx_pkgs src;
+    control&.extra_pkgs <- control.extra_pkgs + pkgs;
+    var pkg_cflags = Empty[string];
+    if pkgs != Empty[string] do 
+      eprintln$ "[flx:objcxx_compile_static1] Adding packages " + str pkgs;
+      var PKGCONFIG_PATH=map 
+         (fun (s:string) => "--path+="+s) 
+         config.FLX_CONFIG_DIRS
+      ;
+      var allargs = PKGCONFIG_PATH+"--field=cflags"+"--keepleftmost"+pkgs+control.pkgs;
+      var ret,mycflags = FlxPkgConfig::flx_pkgconfig(allargs);
+      if ret != 0 do
+        eprintln$ "[flx:objcxx_compile_static1] Error " + str ret + " executing flx_pkgconfig, args=" + str allargs;
+        // FIXME
+        System::exit (1);
+      done
+      pkg_cflags = mycflags;
+    done
+ 
+    var tc = toolchain_maker  
+      extend dflt_toolchain_config with 
+      (
+        ccflags = /*ccflags + */ control.CCFLAGS + pkg_cflags,
+        header_search_dirs = config.FLX_RTL_DIRS+control.EXTRA_INCLUDE_DIRS,
+        macros = control.MACROS,
+        debugln = if control.ECHO==1 then echoln[string] else debugln[string] endif
+      )
+      end
+    ;
+    if control.RECOMPILE==1 or not cxx_depcheck (tc,src,dst) do
+      var result = tc.cxx_static_object_compiler (dst=dst,src=src); 
+      showtime("Static objc++   : "+src,t0);
+      if result != 0 do
+        eprintln$ "[flx] objC++ compilation "+src+" failed";
+      done
+      return result;
+    else
+      return 0;
+    done
+
+  }
+
+
 //----------------------------------------------------------------------------
 // C++ COMPILATION
 //----------------------------------------------------------------------------
@@ -1734,28 +2087,14 @@ object processing_env(
     done
   }
 
-  // C++ dynamic (many files)
+  // MASTER C/C++ dynamic (many files)
+  // does both C and C++ compilation
   gen cxx_compile_dynamic (ehandler:1->0) : int =
   {
     var EXT_SHARED_OBJ = #((toolchain_maker dflt_toolchain_config).dynamic_object_extension);
-    if
-      control.CXXONLY == 0 and (
-      control.LINKIT == 1 or 
-      control.OUTPUT_FILENAME_SPECIFIED == 0 and
-      control.OUTPUT_FILENAME_WITHOUT_EXTENSION_SPECIFIED == 0)
-    do
-//println$ "Compiling thunk";
-      var result = cxx_compile_dynamic1 ehandler
-      (
-        dvars.cpp_filebase+"_static_link_thunk.cpp",
-        dvars.cpp_filebase+"_static_link_thunk"+EXT_SHARED_OBJ
-      );
-      if result != 0 return result;
-    done
-
     if control.CXXONLY == 0 do
       if control.LINKIT == 0 do
-        result = cxx_compile_dynamic1 ehandler (dvars.cpp_filebase+".cpp", control.LINKER_OUTPUT_FILENAME);
+        var result = cxx_compile_dynamic1 ehandler (dvars.cpp_filebase+".cpp", control.LINKER_OUTPUT_FILENAME);
         if result != 0 return result;
       else
         result = cxx_compile_dynamic1 ehandler (dvars.cpp_filebase+".cpp", dvars.cpp_filebase+EXT_SHARED_OBJ);
@@ -1763,16 +2102,40 @@ object processing_env(
       done
     done
 
-    for src in control.cpps do
+    begin for src in control.objcs do
+      var dst = Filename::strip_extension src + EXT_SHARED_OBJ;
+      result = objc_compile_dynamic1 ehandler (src,dst);
+      if result != 0 return result;
+      += (&control.objs, dst);
+    done end
+
+    begin for src in control.objcpps do
+      var dst = Filename::strip_extension src + EXT_SHARED_OBJ;
+      result = objcxx_compile_dynamic1 ehandler (src,dst);
+      if result != 0 return result;
+      += (&control.objs, dst);
+    done end
+
+
+    begin for src in control.cs do
+      var dst = Filename::strip_extension src + EXT_SHARED_OBJ;
+      result = c_compile_dynamic1 ehandler (src,dst);
+      if result != 0 return result;
+      += (&control.objs, dst);
+    done end
+
+    begin for src in control.cpps do
       var dst = Filename::strip_extension src + EXT_SHARED_OBJ;
       result = cxx_compile_dynamic1 ehandler (src,dst);
       if result != 0 return result;
-      += (&control.cppos, dst);
-    done
+      += (&control.objs, dst);
+    done end
+
     return 0;
   }
 
-  // C++ static (one file)
+  // MASTER C/C++ static (one file)
+  // does both C and C++ compilation
   gen cxx_compile_static (ehandler:1->0) : int = 
   {
     // we only need the thunk if we're linking OR -o switch was NOT specified
@@ -1795,12 +2158,33 @@ object processing_env(
       if result != 0 return result;
     done
 
-    for src in control.cpps do
+    begin for src in control.objcs do
+      var dst = Filename::strip_extension src +EXT_STATIC_OBJ;
+      result = objc_compile_static1 ehandler (src,dst);
+      if result != 0 return result;
+      += (&control.objs,dst);
+    done end
+   
+    begin for src in control.objcpps do
+      var dst = Filename::strip_extension src +EXT_STATIC_OBJ;
+      result = objcxx_compile_static1 ehandler (src,dst);
+      if result != 0 return result;
+      += (&control.objs,dst);
+    done end
+ 
+    begin for src in control.cs do
+      var dst = Filename::strip_extension src +EXT_STATIC_OBJ;
+      result = c_compile_static1 ehandler (src,dst);
+      if result != 0 return result;
+      += (&control.objs,dst);
+    done end
+   
+    begin for src in control.cpps do
       var dst = Filename::strip_extension src +EXT_STATIC_OBJ;
       result = cxx_compile_static1 ehandler (src,dst);
       if result != 0 return result;
-      += (&control.cppos,dst);
-    done
+      += (&control.objs,dst);
+    done end
    
     if control.CXXONLY == 0 do
       if control.LINKIT == 0 do
@@ -1880,6 +2264,9 @@ object processing_env(
     return result;
   }
 
+//=========================================================
+// OCAML
+//=========================================================
  gen ocaml_compile1 (ehandler:1->0) (deps:list[string], s:string) = {
     var xqt = dxqt (control.ECHO == 1 or control.DEBUG_FLX);
     var result = xqt("ocamlopt.opt -c " + cat " " deps + " "+ s);
@@ -1911,6 +2298,30 @@ object processing_env(
  {
    return ocaml_compile ehandler;
  }
+
+// SWIFT
+
+ gen swift_compile1 (ehandler:1->0) (deps:list[string], s:string) = {
+    var xqt = dxqt (control.ECHO == 1 or control.DEBUG_FLX);
+    var result = xqt("swiftc -c " + cat " " deps + " "+ s);
+    C_hack::ignore(result);
+    return 0;
+ }
+
+ gen swift_compile (ehandler:1->0) = {
+    var deps = Empty[string];
+    for src in control.swifts do
+      var result = swift_compile1 ehandler (deps,src);
+      if result != 0 return result;
+    done
+    return 0;
+ }
+
+ gen run_swift_compiler_if_required (ehandler:1->0) : int =
+ {
+   return swift_compile ehandler;
+ }
+
 
 /*
 
@@ -1986,18 +2397,19 @@ object processing_env(
       end
     ;
     var EXT_SHARED_OBJ = #(tc.dynamic_object_extension);
+    var extra_objects = map (fun (f:string) => f + EXT_SHARED_OBJ) control.cppobases;
     if control.CXXONLY == 0 do
       var result = tc.dynamic_library_linker
         (
           dst=control.LINKER_OUTPUT_FILENAME,
-          srcs= control.cppos + (dvars.cpp_filebase+EXT_SHARED_OBJ)
+          srcs= control.objs + extra_objects + (dvars.cpp_filebase+EXT_SHARED_OBJ)
         )
       ;
     else
       result = tc.dynamic_library_linker
         (
           dst=control.LINKER_OUTPUT_FILENAME,
-          srcs= control.cppos 
+          srcs= control.objs  + extra_objects
         )
       ;
     done
@@ -2051,16 +2463,17 @@ object processing_env(
     println$ "Toolchain loaded " + #(tc.whatami);
 /*
 println$ "flx, prior to calling toolchain: DRIVER OBJS = " + control.DRIVER_OBJS.str;
-println$ "flx, prior to calling toolchain: cppos = " + control.cppos.str;
+println$ "flx, prior to calling toolchain: objs = " + control.objs.str;
 */
     var EXT_DYNAMIC_OBJ = #(tc.dynamic_object_extension);
+    var extra_objects = map (fun (f:string) => f + EXT_DYNAMIC_OBJ) control.cppobases;
     if control.CXXONLY == 0 do
       var result = tc.dynamic_executable_linker
         (
           dst=control.LINKER_OUTPUT_FILENAME,
           srcs= 
             control.DRIVER_OBJS +
-            control.cppos + 
+            control.objs + extra_objects +
             (dvars.cpp_filebase+"_static_link_thunk"+EXT_DYNAMIC_OBJ) + 
             (dvars.cpp_filebase+EXT_DYNAMIC_OBJ)
         )
@@ -2070,7 +2483,7 @@ println$ "flx, prior to calling toolchain: cppos = " + control.cppos.str;
         (
           dst=control.LINKER_OUTPUT_FILENAME,
           srcs= 
-            control.cppos 
+            control.objs + extra_objects
         )
       ;
     done
@@ -2121,13 +2534,14 @@ println$ "flx, prior to calling toolchain: cppos = " + control.cppos.str;
       end
     ;
     var EXT_STATIC_OBJ = #(tc.static_object_extension);
+    var extra_objects = map (fun (f:string) => f + EXT_STATIC_OBJ) control.cppobases;
     if control.CXXONLY == 0 do
       var result = tc.static_executable_linker
         (
           dst=control.LINKER_OUTPUT_FILENAME,
           srcs= 
             control.DRIVER_OBJS +
-            control.cppos + 
+            control.objs + extra_objects +
             (dvars.cpp_filebase+"_static_link_thunk"+EXT_STATIC_OBJ) + 
             (dvars.cpp_filebase+EXT_STATIC_OBJ)
         )
@@ -2137,7 +2551,7 @@ println$ "flx, prior to calling toolchain: cppos = " + control.cppos.str;
         (
           dst=control.LINKER_OUTPUT_FILENAME,
           srcs= 
-            control.cppos 
+            control.objs + extra_objects
         )
       ;
     done
@@ -2170,17 +2584,18 @@ println$ "flx, prior to calling toolchain: cppos = " + control.cppos.str;
       end
     ;
     var EXT_STATIC_OBJ = #(tc.static_object_extension);
+    var extra_objects = map (fun (f:string) => f + EXT_STATIC_OBJ) control.cppobases;
     if control.CXXONLY == 0 do
       var result = tc . static_library_linker 
         (
-          srcs=control.cppos + (dvars.cpp_filebase+EXT_STATIC_OBJ) ,
+          srcs=control.objs + extra_objects + (dvars.cpp_filebase+EXT_STATIC_OBJ) ,
           dst=control.LINKER_OUTPUT_FILENAME
         )
       ;
     else
       result = tc . static_library_linker 
         (
-          srcs=control.cppos,
+          srcs=control.objs + extra_objects,
           dst=control.LINKER_OUTPUT_FILENAME
         )
       ;
@@ -2193,6 +2608,23 @@ println$ "flx, prior to calling toolchain: cppos = " + control.cppos.str;
   }
 
 
+  gen cal_object_extension () : string =
+  {
+    var tc = toolchain_maker  
+    extend dflt_toolchain_config with 
+    (
+      //ccflags = ccflags + control.CCFLAGS,
+      debugln = if control.ECHO==1 then echoln[string] else debugln[string] endif
+    )
+    end
+    ;
+    var EXT_OBJ = 
+      if control.STATIC == 0 
+      then #(tc.dynamic_object_extension)
+      else #(tc.static_object_extension)
+    ;
+    return EXT_OBJ;
+}
 
   // Assumes C++ generated by flxg (using timestamp of dep file)
   // Assumes command line C++ file includes older than the argument (fixme!)
@@ -2206,25 +2638,37 @@ println$ "flx, prior to calling toolchain: cppos = " + control.cppos.str;
       return false;
     elif control.CHECK_DEPENDENCIES == 1 do
       debugln "Checking C++->binary dependencies since CHECK_DEPENDENCIES=1 to see if the output is uptodate";
-
+      var EXT_OBJ = cal_object_extension();
+      var extra_objects = map (fun (f:string) => f + EXT_OBJ) control.cppobases;
       var xtime = FileStat::dfiletime(control.LINKER_OUTPUT_FILENAME,#FileStat::past_time);
       val depfilename = cache_join (config.FLX_OUTPUT_DIR, dvars.filebase+".dep");
       var flx_srctime = FileStat::dfiletime (depfilename,#FileStat::future_time);
+      var c_srctime = fold_left maxf #FileStat::past_time control.cs;
       var cpp_srctime = fold_left maxf #FileStat::past_time control.cpps;
-      var obj_srctime = fold_left maxf #FileStat::past_time control.cppos;
-      var deptime = max (max (flx_srctime, cpp_srctime), obj_srctime);
+      var objc_srctime = fold_left maxf #FileStat::past_time control.objcs;
+      var objcpp_srctime = fold_left maxf #FileStat::past_time control.objcpps;
+      var obj_srctime = fold_left maxf #FileStat::past_time (control.objs + extra_objects);
+      var deptime = max (max (max (flx_srctime, cpp_srctime), c_srctime), obj_srctime);
       var uptodate = xtime > deptime;
 
 
+      debugln$ "Extra objc sources  "+ str control.cs;
+      debugln$ "Extra objc++ sources  "+ str control.cpps;
+      debugln$ "Extra c sources  "+ str control.cs;
       debugln$ "Extra c++ sources  "+ str control.cpps;
-      debugln$ "Extra object files "+ str control.cppos;
+      debugln$ "Extra object files "+ str control.objs;
+      debugln$ "Extra object bases "+ str control.cppobases;
 
       debugln$ "Extra ocaml files  "+ str control.ocamls;
+      debugln$ "Extra swift files  "+ str control.swifts;
 
       debugln$ "Filebase = " + dvars.filebase; 
 
       debugln$ "cache   time = " + FileStat::strfiletime (control.cache_time);
       debugln$ "flx_src time = " + FileStat::strfiletime (flx_srctime);
+      debugln$ "objc_src time = " + FileStat::strfiletime (objc_srctime);
+      debugln$ "objcpp_src time = " + FileStat::strfiletime (objcpp_srctime);
+      debugln$ "c_src time = " + FileStat::strfiletime (c_srctime);
       debugln$ "cpp_src time = " + FileStat::strfiletime (cpp_srctime);
       debugln$ "obj_src time = " + FileStat::strfiletime (obj_srctime);
 
@@ -2414,6 +2858,13 @@ println$ "flx, prior to calling toolchain: cppos = " + control.cppos.str;
       debugln "Ocaml compilation skipped by switch";
     done
 
+    if control.CCOMPILEIT == 1 do // use this switch for swift compiles too
+      result = run_swift_compiler_if_required ehandler;
+    else 
+      debugln "Swift compilation skipped by switch";
+    done
+
+
     if control.LINKIT == 1 do
       result = run_linker_if_required ehandler;
       if result != 0 return result;
@@ -2601,7 +3052,12 @@ class Flx
           control.EXPECT <- "";
           control.STDIN <- "";
           var dvars = FlxDepvars::cal_depvars(toolchain_maker,c_compiler_executable, cxx_compiler_executable, *config,control,*loopctl);
-          println$ f"Processing [%02d/%02d]: %S" (i, n, file);
+          if control*.FANCYLOG == 1 do
+            print$ f"Processing [%02d/%02d]: %S\r" (i, n, (file+" "*40).(0..40));
+            fflush stdout;
+          else
+            println$ f"Processing [%02d/%02d]: %S" (i, n, file);
+          done
           var pe = processing_env(toolchain_maker,c_compiler_executable, cxx_compiler_executable, *config,*control,dvars);
           call_with_trap {
             proc ehandler() {
@@ -2793,7 +3249,12 @@ class BootFlx
           control.STDOUT <- "";
           control.EXPECT <- "";
           var dvars = FlxDepvars::cal_depvars(toolchain_maker,c_compiler_executable, cxx_compiler_executable, *config,control,*loopctl);
-          println$ f"Processing [%02d/%02d]: %S" (i, n, file);
+          if control*.FANCYLOG == 1 do
+            print$ f"Processing [%02d/%02d]: %S\r" (i, n, (file+" "*40).(0..40));
+            fflush stdout;
+          else
+            println$ f"Processing [%02d/%02d]: %S" (i, n, file);
+          done
           var pe = processing_env(toolchain_maker,c_compiler_executable, cxx_compiler_executable, *config,*control,dvars);
           result = pe.runit(ehandler);
           if result != 0 goto endoff;

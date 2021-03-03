@@ -17,16 +17,16 @@ type bexpr_t =
      first argument: base value type of machine pointer
      second argument: result value type
      third argument: machine pointer value, type: BTYP_pointer (base value type)
-     fourth argument: divisor
+     fourth argument: component index
   *)
-  | BEXPR_cltpointer of Flx_btype.t * Flx_btype.t * t * int 
+  | BEXPR_cltpointer of Flx_btype.t * Flx_btype.t * t * int list
 
   (* Compact linear pointer projection term:
      first argument: base value type
      second argument: result value type
-     third argument: divisor required for value projection
+     third argument: component index list
   *)
-  | BEXPR_cltpointer_prj of Flx_btype.t * Flx_btype.t * int
+  | BEXPR_cltpointer_prj of Flx_btype.t * Flx_btype.t * int list
 
   | BEXPR_uniq of t
   | BEXPR_likely of t
@@ -41,9 +41,11 @@ type bexpr_t =
   | BEXPR_apply_stack of bid_t * Flx_btype.t list * t
   | BEXPR_apply_struct of bid_t * Flx_btype.t list * t
   | BEXPR_tuple of t list
+  | BEXPR_compacttuple of t list
   | BEXPR_record of (string * t) list
   | BEXPR_polyrecord of (string * t) list * t
   | BEXPR_remove_fields of t * string list
+  | BEXPR_getall_field of t * string
   | BEXPR_closure of bid_t * Flx_btype.t list
   | BEXPR_identity_function of Flx_btype.t
 
@@ -100,6 +102,15 @@ type bexpr_t =
   | BEXPR_lrbrack of t (* mediating morphism of a sum *)
 
 and t = bexpr_t * Flx_btype.t
+
+let rec show_bexpr e = match e with
+  | BEXPR_apply (f,a),_ -> "BEXPR_apply(" ^ show_bexpr f ^ "," ^ show_bexpr a ^ ")"
+  | BEXPR_closure (i,_),_ -> "BEXPR_closure(" ^ string_of_int i ^ "[..])"
+  | BEXPR_tuple es,_ -> "BEXPR_tuple(" ^ String.concat "," (List.map show_bexpr es) ^")"
+  | BEXPR_compacttuple es,_ -> "BEXPR_compacttuple(" ^ String.concat "," (List.map show_bexpr es) ^")"
+  | BEXPR_varname (i,_),_ -> "BEXPR_varname(" ^ string_of_int i ^ ",[..])"
+
+  | _ -> "X"
 
 let sbt typ = Flx_btype.str_of_btype typ
 
@@ -173,6 +184,10 @@ abstraction.
 let bexpr_lambda i vt ((x,rt) as e)  = 
   BEXPR_lambda (i,vt,e),Flx_btype.btyp_function (vt,rt)
 
+let bexpr_linearlambda i vt ((x,rt) as e)  = 
+  BEXPR_lambda (i,vt,e),Flx_btype.btyp_linearfunction (vt,rt)
+
+
 let bexpr_int i = BEXPR_int i, Flx_btype.btyp_int ()
 
 let bexpr_not (e,t) : t = BEXPR_not (e,t), complete_check "bexpr_not" t
@@ -203,26 +218,26 @@ let bexpr_wref t (bid, ts) =
   | Some k -> bexpr_unitptr k
   | _ -> BEXPR_wref (bid, complete_check_list ts), complete_check "bexpr_wref" t
 
-let bexpr_cltpointer d c p v =
+let bexpr_cltpointer d c p (vs: int list) =
   let t = Flx_btype.btyp_cltpointer d c in 
-  BEXPR_cltpointer (d,c,p,v), complete_check "bexpr_cltpointer" t
+  BEXPR_cltpointer (d,c,p,vs), complete_check "bexpr_cltpointer" t
 
 (* FIXME! *)
 let bexpr_cltpointer_of_pointer ((_,pt) as p) = 
   match pt with
   | Flx_btype.BTYP_ptr (m,vt,ts) ->
-    if Flx_btype.islinear_type () vt then
-      bexpr_cltpointer vt vt p 1
+    if Flx_btype.islinear_type vt then
+      bexpr_cltpointer vt vt p []
     else
       failwith "cltpointer_of_pointer requires (pointer to) compact linear type as argument"
   | _ -> 
     failwith "cltpointer_of_pointer requires pointer (to compact linear type) as argument"
  
-let bexpr_cltpointer_prj base_value_type target_value_type divisor =
+let bexpr_cltpointer_prj base_value_type target_value_type component_list =
   let d = Flx_btype.btyp_cltpointer base_value_type base_value_type in
   let c = Flx_btype.btyp_cltpointer base_value_type target_value_type in
   let t = Flx_btype.btyp_function (d,c) in
-  BEXPR_cltpointer_prj (base_value_type, target_value_type, divisor), complete_check "bexpr_cltpointer_prj" t
+  BEXPR_cltpointer_prj (base_value_type, target_value_type, component_list ), complete_check "bexpr_cltpointer_prj" t
 
 let bexpr_likely ((_,t) as e) = BEXPR_likely e, complete_check "bexpr_likely" t
 
@@ -258,17 +273,25 @@ let bexpr_apply t (e1, e2) =
       failwith ("SYSTEM ERROR: bexpr_apply: clt projection domain\n"^ Flx_btype.st fd ^ 
         "\ndoesn't agree with clt pointer codomain\n" ^ Flx_btype.st ac);
     end;
-    bexpr_cltpointer ad fc p (fv * av)
+    bexpr_cltpointer ad fc p (av @ fv)
 
   | _ ->
   begin match Flx_btype.unfold "Flx_bexpr:bexpr_apply" ft with
+  | Flx_btype.BTYP_lineareffector (d,_,c)
+  | Flx_btype.BTYP_linearfunction (d,c)
   | Flx_btype.BTYP_effector (d,_,c)
   | Flx_btype.BTYP_function (d,c)
   | Flx_btype.BTYP_cfunction (d,c) ->
-    if not (Flx_typeeq.type_eq Flx_btype.st counter d at) then begin
-      print_endline ("Warning: bexpr_apply: function type: " ^ Flx_btype.st ft);
-      print_endline ("Warning: bexpr_apply: function domain\n"^ Flx_btype.st d ^ "\ndoesn't agree with argtype\n" ^ Flx_btype.st at);
-      failwith ("SYSTEM ERROR: bexpr_apply: function domain\n"^ Flx_btype.st d ^ "\ndoesn't agree with argtype\n" ^ Flx_btype.st at);
+    (* hack, let anything match parameter with ellipsis at end, should check prefix *)
+    begin
+      match d with 
+      | BTYP_tuple ls when (match List.rev ls with | BTYP_ellipsis :: _-> true | _ -> false) -> ()
+      | _ ->
+      if not (Flx_typeeq.type_eq Flx_btype.st counter d at) then begin
+        print_endline ("Warning: bexpr_apply: function type: " ^ Flx_btype.st ft);
+        print_endline ("Warning: bexpr_apply: function domain\n"^ Flx_btype.st d ^ "\ndoesn't agree with argtype\n" ^ Flx_btype.st at);
+        failwith ("SYSTEM ERROR: bexpr_apply: function domain\n"^ Flx_btype.st d ^ "\ndoesn't agree with argtype\n" ^ Flx_btype.st at);
+      end
     end; 
     if not (Flx_typeeq.type_eq Flx_btype.st counter c t) then begin
       print_endline ("Warning: bexpr_apply: function type: " ^ Flx_btype.st ft);
@@ -316,6 +339,15 @@ let bexpr_tuple t es =
   | [x] -> x
   | _ -> BEXPR_tuple es, complete_check "bexpr_tuple(client)" t
 
+let bexpr_compacttuple t es = 
+  let ts = List.map snd es in
+  let _ = List.map (complete_check "bexpr_compacttuple(component)") ts in 
+  match es with 
+  | [] -> bexpr_unit 
+  | [x] -> x
+  | _ -> BEXPR_compacttuple es, complete_check "bexpr_compacttuple(client)" t
+
+
 let bexpr_closure t (bid, ts) = 
   let _ = List.map (complete_check "bexpr_closure(index)") ts in 
 (*
@@ -362,6 +394,8 @@ let bexpr_prj n d c =
  
   (* Arrays with unitsum indices *)
 
+  | Flx_btype.BTYP_ptr (_, Flx_btype.BTYP_compactarray (_,Flx_btype.BTYP_unitsum m), _)
+  | Flx_btype.BTYP_compactarray (_,Flx_btype.BTYP_unitsum m)
   | Flx_btype.BTYP_ptr (_, Flx_btype.BTYP_array (_,Flx_btype.BTYP_unitsum m), _)
   | Flx_btype.BTYP_array (_,Flx_btype.BTYP_unitsum m) ->
     if n>= m then
@@ -371,6 +405,8 @@ let bexpr_prj n d c =
     )
 
   (* Tuples *)
+  | Flx_btype.BTYP_ptr (_, Flx_btype.BTYP_compacttuple ls,_)
+  | Flx_btype.BTYP_compacttuple ls 
   | Flx_btype.BTYP_ptr (_, Flx_btype.BTYP_tuple ls,_)
   | Flx_btype.BTYP_tuple ls -> 
     if n>= List.length ls then
@@ -530,6 +566,33 @@ print_endline ("Type is " ^ st result_type);
 print_endline "type BUGGED";
     failwith ("BUG: caller should have checked! remove fields from non-(poly)record type " ^ Flx_btype.st domain)
 
+let bexpr_getall_field (e',t' as e) s = 
+  match t' with
+  | Flx_btype.BTYP_array _
+  | Flx_btype.BTYP_tuple _ ->
+    if s = "" then e else bexpr_unit
+
+  | Flx_btype.BTYP_record rs
+  | Flx_btype.BTYP_polyrecord (rs,_,_) ->
+    let mkprj fld seq fldt : t = bexpr_rnprj fld seq t' fldt in
+    let dcnt = ref 0 in
+    let nuflds = ref [] in
+    List.iter
+      (fun (s',t) ->
+        if s = s' then begin 
+          let nufld = bexpr_apply t (mkprj s (!dcnt) t, e) in 
+          nuflds := nufld :: !nuflds;
+          incr dcnt
+        end;
+      )
+    rs;
+    let nuflds = List.rev !nuflds in
+    let ts = List.map snd nuflds in
+    bexpr_tuple (Flx_btype.btyp_tuple ts) nuflds
+
+  | _ -> bexpr_unit
+  
+
 (************************ POLYRECORD **************************)
 let bexpr_polyrecord (es: (string * t) list) ((e',t') as e) =
 (*
@@ -657,11 +720,13 @@ let bexpr_variant t (name, ((_,argt) as arg)) =
   | _ -> failwith ("bexpr_variant requires variant type, got " ^ Flx_btype.st t)
 
 
+(* now generic, n can be anything that bexpr_prj accepts *)
 let bexpr_get_n c n (e,d) =  
   match Flx_btype.trivorder c with
   | Some k -> bexpr_unitptr k
   | _ -> bexpr_apply c ( bexpr_prj n d c, (e,d) )
 
+(* apply record projection *)
 let bexpr_get_named c name (e,d) =
   match Flx_btype.trivorder c with
   | Some k -> bexpr_unitptr k
@@ -721,10 +786,26 @@ let bexpr_range_check t (e1, e2, e3) = BEXPR_range_check (e1, e2, e3), complete_
 
 (* STANDARD FORWARD COMPOSITION! e2 is applied first! e1 (e2 x) *)
 let bexpr_compose t (_,ft1 as e1, (_,ft2 as e2)) = 
-  begin match t,ft1,ft2 with 
-  | Flx_btype.BTYP_function (d,c), Flx_btype.BTYP_function (d1,c1), Flx_btype.BTYP_function (d2,c2) ->
-    if not (d=d2 && c=c1 && c2=d1)  (* should be using type equality check *)
-    then print_endline ("Domain/codomain mismatch in composition (fix diag if we get this one)") 
+  begin match t with
+  | Flx_btype.BTYP_function (d,c) ->
+    begin match ft1,ft2 with 
+    | Flx_btype.BTYP_function (d1,c1), Flx_btype.BTYP_function (d2,c2) 
+    | Flx_btype.BTYP_linearfunction (d1,c1), Flx_btype.BTYP_function (d2,c2) 
+    | Flx_btype.BTYP_function (d1,c1), Flx_btype.BTYP_linearfunction (d2,c2) 
+    | Flx_btype.BTYP_linearfunction (d1,c1), Flx_btype.BTYP_linearfunction (d2,c2) 
+      ->
+      if not (d=d2 && c=c1 && c2=d1)  (* should be using type equality check *)
+      then print_endline ("Domain/codomain mismatch in composition (fix diag if we get this one)") 
+    | _ -> print_endline ("Invalid types in composition, expected functions (fix diag if we get this one)")
+    end
+  | Flx_btype.BTYP_linearfunction (d,c) ->
+    begin match ft1,ft2 with 
+    | Flx_btype.BTYP_linearfunction (d1,c1), Flx_btype.BTYP_linearfunction (d2,c2)
+      ->
+      if not (d=d2 && c=c1 && c2=d1)  (* should be using type equality check *)
+      then print_endline ("Domain/codomain mismatch in composition (fix diag if we get this one)") 
+    | _ -> print_endline ("Invalid types in composition, expected linear functions (fix diag if we get this one)")
+    end
   | _ -> print_endline ("Invalid types in composition, expected functions (fix diag if we get this one)")
   end;
   BEXPR_compose (e1, e2), complete_check "bexpr_compose" t
@@ -1048,9 +1129,11 @@ let flat_iter
       List.iter f_btype ts;
       f_bexpr e2
   | BEXPR_tuple es -> List.iter f_bexpr es
+  | BEXPR_compacttuple es -> List.iter f_bexpr es
   | BEXPR_record es -> List.iter (fun (s,e) -> f_bexpr e) es
   | BEXPR_polyrecord (es,e) -> List.iter (fun (s,e) -> f_bexpr e) es; f_bexpr e
   | BEXPR_remove_fields (e,ss) -> f_bexpr e
+  | BEXPR_getall_field (e,s) -> f_bexpr e
   | BEXPR_closure (i,ts) ->
       f_bid i;
       List.iter f_btype ts
@@ -1169,11 +1252,13 @@ let map
   | BEXPR_apply_stack (i,ts,e2) ->
       bexpr_apply_stack t (f_bid i, List.map f_btype ts, f_bexpr e2)
   | BEXPR_tuple  es -> bexpr_tuple t (List.map f_bexpr es)
+  | BEXPR_compacttuple  es -> bexpr_compacttuple t (List.map f_bexpr es)
   | BEXPR_record es ->
       bexpr_record (List.map (fun (s,e) -> s, f_bexpr e) es)
   | BEXPR_polyrecord (es,e) ->
       bexpr_polyrecord (List.map (fun (s,e) -> s, f_bexpr e) es) (f_bexpr e)
   | BEXPR_remove_fields (e,ss) -> bexpr_remove_fields (f_bexpr e) ss
+  | BEXPR_getall_field (e,s) -> bexpr_getall_field (f_bexpr e) s
 
   | BEXPR_closure (i,ts) ->
       bexpr_closure t (f_bid i, List.map f_btype ts)
@@ -1246,8 +1331,8 @@ let rec reduce e =
     | BEXPR_cond ((BEXPR_case (1,Flx_btype.BTYP_unitsum 2),Flx_btype.BTYP_unitsum 2), tr, _),_ -> tr
     | BEXPR_rprj (name,seq,d,c),_ -> bexpr_rnprj name seq d c 
     | BEXPR_polyrecord (es,e),_ -> bexpr_polyrecord es e
-    | BEXPR_remove_fields (e,ss),_ -> 
-      bexpr_remove_fields e ss
+    | BEXPR_remove_fields (e,ss),_ -> bexpr_remove_fields e ss
+    | BEXPR_getall_field (e,s),_ -> bexpr_getall_field e s
     | x -> x
   in f_bexpr e
 

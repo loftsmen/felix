@@ -33,8 +33,8 @@ open class MachinePointers
 
   //$ Dereference a Felx pointer.
   //lvalue fun deref[T]: &T -> T = "*$1";
-  fun _deref[T]: &<T -> T = "*$t";
-  fun deref[T] (p:&<T) => _deref p;
+  fun _deref[T:LINEAR]: &<T -> T = "*$t";
+  fun deref[T:LINEAR] (p:&<T) => _deref p;
 }
 
 open class CompactLinearPointers 
@@ -102,7 +102,7 @@ open class Cptr
   //$ Allocate managed C++ object directly on heap.
   //$ Felix does not check the argument type, but C++ does.
   //$ The argument must select a suitable constructor.
-  gen gcnew[T,A] : A -> &T = "new (*PTF gcp, @?1,true) (?1)($a)";
+  gen gcnew[T,A] : A -> &T = "new (*ptf->gcp, @?1,true) (?1)($a)";
 
 }
 
@@ -121,7 +121,7 @@ is an incrementable, non-NULL pointer to a contiguous store.
 
 // For some reason this functor must be in global scope
 //$ Define prefix + notation.
-typedef fun prefix_plus(T:TYPE) : TYPE => Carray::carray[T]; 
+typedef fun tprefix_plus(T:TYPE) : TYPE => Carray::carray[T]; 
 
 //$ A carray[T] = +T is an incrementable, non-NULL, pointer.
 open class Carray
@@ -159,6 +159,9 @@ to reserve such carrays for C datatypes.
 
   //$ Store value in array at index position.
   proc set[T] : carray[T] * !ints * T = "$1[$2]=$3;";
+  proc set[T] : carray[T] *  T = "$1[0]=$2;";
+
+  proc storeat[T] (lhs: carray[T], rhs: T) { set (lhs, 0, rhs); }
 
   //$ Get by index using application.
   //$ i x = x . i = get (x,i)
@@ -230,7 +233,7 @@ of lvalues in general: this is a very special case.
 @h2 Conversions
 @tangle carray.flx
   //$ Get carray of an array.
-  fun stl_begin[T,N]: carray[array[T,N]] -> carray[T] = "(?1*)&($1->data)";
+  fun stl_begin[T,N:COMPACTLINEAR]: carray[array[T,N]] -> carray[T] = "(?1*)&($1->data)";
 
   //$ Unsafe conversion of Felix pointer to carray.
   fun prefix_plus [T]:&T -> carray[T] = "$t"; // unsafe
@@ -242,11 +245,11 @@ of lvalues in general: this is a very special case.
   ctor[T] carray[T] : &T = "$t";
 
   //$ Get a carray from a Felix array object.
-  ctor[T,N] carray[T]: &array[T,N] = "($1)->data";
+  ctor[T,N:COMPACTLINEAR] carray[T]: &array[T,N] = "($1)->data";
 
 
   //$ Convert C array to Felix array.
-  fun array_of[T,N]: carray[T] -> &array[T,N] = "*(#0*)(void*)$1";
+  fun array_of[T,N:COMPACTLINEAR]: carray[T] -> &array[T,N] = "*(#0*)(void*)$1";
 }
 
 open[T] Eq[carray[T]];

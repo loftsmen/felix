@@ -17,7 +17,7 @@ open Flx_btype_subst
 module WeakSet = Set.Make (
   struct 
     type t=Flx_btype.t
-    let compare = compare
+    let compare = Stdlib.compare
   end
 )
 
@@ -64,7 +64,6 @@ print_endline ("Register type nr " ^ sbt bsym_table t);
   if t <> t' then print_endline ("UNREDUCED TYPE! " ^ sbt bsym_table t ^ " <> " ^ sbt bsym_table t');
   *)
   match t with
-  | BTYP_hole -> assert false
   | BTYP_label -> ()
   | BTYP_fix _
   | BTYP_tuple []
@@ -97,14 +96,11 @@ let register_tuple where syms bsym_table t =
   | BTYP_tuple ts -> record_tuple t
 
   | BTYP_array (t',BTYP_unitsum n) ->
+    if t' = btyp_unit () then () else
     let ts = rev_map (fun _ -> t') (nlist n) in
     record_tuple (btyp_tuple ts)
 
-  | BTYP_record (ts) ->
-    begin match t with
-    | BTYP_tuple [] -> ()
-    | _ -> record_tuple t
-    end
+  | BTYP_record (ts) -> record_tuple t
 
   | _ ->
     print_endline ("flx_treg: from " ^ 
@@ -143,10 +139,23 @@ then
   | BBOOL _
   | BTYP_typeop _
   | BTYP_typeof _
-  | BTYP_hole -> assert false
   | BTYP_rev _ -> assert false (* should have been eliminated *)
+  | BTYP_ellipsis
   | BTYP_label -> ()
-  | BTYP_void -> ()
+
+  | BTYP_instancetype _ -> 
+   (* print_endline ("Flx_treg: Trying to register instancetype");  *)
+   (* This should just pass, the type at this stage is legit but should
+      be eliminated by the time the registration entry would be needed
+   *)
+   ()
+
+  (* compact linear types don't need to be registered *)
+  | BTYP_void
+  | BTYP_tuple [] -> ()
+
+  | BTYP_unitsum _ -> rnr t (* because we typedef them *)
+
   | BTYP_fix (0,_) -> ()
   | BTYP_fix (i,_) -> clierrx "[flx_frontend/flx_treg.ml:123: E356] " sr ("[register_type_r] Fixpoint "^si i^" encountered")
   | BTYP_polyrecord _ -> clierrx "[flx_frontend/flx_treg.ml:124: E357] " sr ("[register_type_r] attempt to bind polyrecord type")
@@ -160,6 +169,18 @@ then
       ":" ^ sbt bsym_table mt);
     *)
     ()
+
+  (* the C representation of a linear function is the same as an ordinary function *)
+  | BTYP_linearfunction (ps,ret) ->
+    let ps = match ps with
+    | BTYP_void -> btyp_tuple []
+    | x -> x
+    in
+    rr ps;
+    rr ret;
+    rnr (btyp_function (ps,ret))
+
+
   | BTYP_function (ps,ret) ->
     let ps = match ps with
     | BTYP_void -> btyp_tuple []
@@ -184,13 +205,27 @@ print_endline ("Flx_treg: attempt to register effector type, register equivalent
     (* PROBABLY THIS SHOULD BE FUNCTION: erase effects! *)
     rnr (btyp_function (ps,ret))
 
+  | BTYP_lineareffector (ps,effects, ret) ->
+print_endline ("Flx_treg: attempt to register linear effector type, register equivalent linear function type instead");
+
+    let ps = match ps with
+    | BTYP_void -> btyp_tuple []
+    | x -> x
+    in
+    rr ps;
+    rr ret;
+    (* PROBABLY THIS SHOULD BE FUNCTION: erase effects! *)
+    rnr (btyp_function (ps,ret))
+
   | BTYP_cfunction (ps,ret) ->
     rr ps;
     rr ret;
     rnr t
 
+  | BTYP_compactrptsum (n,b)
   | BTYP_rptsum (n,b) -> rr n; rr b; rnr t
 
+  | BTYP_compactarray (ps,ret)
   | BTYP_array (ps,ret) ->
 (*
 print_endline ("Array type " ^ sbt bsym_table t ^ " base type " ^ sbt bsym_table ps ^ " index type " ^ sbt bsym_table ret);
@@ -206,7 +241,10 @@ print_endline ("Array type " ^ sbt bsym_table t ^ " base type " ^ sbt bsym_table
     (* | _ -> syserr sr ("Array index type must be unitsum, got " ^ sbt bsym_table ret) *)
     end
 
+  | BTYP_compacttuple ps 
   | BTYP_tuple ps -> iter rr ps; rnr t
+  | BTYP_intersect ps -> iter rr ps; rnr t
+
   | BTYP_tuple_cons (t1,t2) ->  assert false
   | BTYP_tuple_snoc (t1,t2) ->  assert false
   | BTYP_vinst _  -> assert false
@@ -214,11 +252,11 @@ print_endline ("Array type " ^ sbt bsym_table t ^ " base type " ^ sbt bsym_table
   | BTYP_record (ps) -> iter (fun (s,t)->rr t) ps; rnr t
   | BTYP_variant ps -> iter (fun (s,t)->rr t) ps; rnr t
 
+  | BTYP_compactsum ps
   | BTYP_sum ps ->
     (* iter rr ps; *) (* should be driven by constructors *)
     rnr t
 
-  | BTYP_unitsum k -> rnr t
   (* NOTE: pointer type is registered before the type it points
     to because it can be incomplete, whereas the type it
     points to may need a complete pointer type: this
@@ -235,13 +273,11 @@ print_endline ("ERROR, trying to register uniq type " ^ Flx_btype.st t');
   assert false
 
   | BTYP_ptr (`N,_,_) -> assert false
-  | BTYP_ptr (`R,_,_) -> assert false
-  | BTYP_ptr (`W,_,_) -> assert false
   | BTYP_ptr (_,_,(_::_::_)) -> assert false
 
 
-  | BTYP_ptr (`RW,t',[]) -> add_weak weak t'; rnr t
-  | BTYP_ptr (`RW,c,[d]) -> rr d; rr c; rnr t
+  | BTYP_ptr (_,t',[]) -> add_weak weak t'; rnr t
+  | BTYP_ptr (_,c,[d]) -> rr d; rr c; rnr t
 
   | BTYP_inst (i,ts,_)->
 (*

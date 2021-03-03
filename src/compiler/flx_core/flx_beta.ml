@@ -286,7 +286,8 @@ print_endline ("Beta-reducing typeop " ^ op ^ ", type=" ^ sbt bsym_table t);
 *)
     reduce_typeop op (br t) k
   | BTYP_typeof _ -> t
-  | BTYP_hole -> assert false
+  | BTYP_instancetype sr -> btyp_instancetype sr
+  | BTYP_ellipsis -> btyp_ellipsis (* not a value type! *)
   | BTYP_none -> assert false
   | BTYP_fix _ -> (* print_endline "Returning fixpoint"; *)  t
   | BTYP_type_var (i,_) -> t
@@ -322,13 +323,21 @@ print_endline ("Beta-reducing typeop " ^ op ^ ", type=" ^ sbt bsym_table t);
   | BTYP_tuple_snoc (t1,t2) -> btyp_tuple_snoc (br t1) (br t2)
   | BTYP_inst (i,ts,mt) -> btyp_inst (i, List.map br ts,mt)
   | BTYP_vinst (i,ts,mt) -> btyp_vinst (i, List.map br ts,mt)
-  | BTYP_tuple ls -> btyp_tuple (List.map br ls)
   | BTYP_rev t -> btyp_rev (br t)
   | BTYP_uniq t -> btyp_uniq (br t)
 
+  | BTYP_compacttuple ls -> btyp_compacttuple (List.map br ls)
+  | BTYP_compactarray (i,t) -> btyp_compactarray (br i, br t)
+  | BTYP_compactrptsum (i,t) -> btyp_compactrptsum (br i, br t)
+  | BTYP_compactsum ls -> btyp_compactsum (List.map br ls)
+
+
+  | BTYP_tuple ls -> btyp_tuple (List.map br ls)
+  | BTYP_intersect ls -> btyp_intersect (List.map br ls)
   | BTYP_array (i,t) -> btyp_array (br i, br t)
   | BTYP_rptsum (i,t) -> btyp_rptsum (br i, br t)
   | BTYP_sum ls -> btyp_sum (List.map br ls)
+
   | BTYP_record (ts) ->
      let ss,ls = List.split ts in
      btyp_record (List.combine ss (List.map br ls))
@@ -407,8 +416,11 @@ print_endline ("Beta-reducing typeop " ^ op ^ ", type=" ^ sbt bsym_table t);
 
 
   | BTYP_type_tuple ls -> btyp_type_tuple (List.map br ls)
+
   | BTYP_function (a,b) -> btyp_function (br a, br b)
   | BTYP_effector (a,e,b) -> btyp_effector (br a, br e, br b)
+  | BTYP_linearfunction (a,b) -> btyp_linearfunction (br a, br b)
+  | BTYP_lineareffector (a,e,b) -> btyp_lineareffector (br a, br e, br b)
   | BTYP_cfunction (a,b) -> btyp_cfunction (br a, br b)
 
   | BTYP_ptr (m,t,ts)  -> btyp_ptr m (br t) (List.map br ts)

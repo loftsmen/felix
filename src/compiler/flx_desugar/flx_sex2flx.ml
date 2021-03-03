@@ -48,6 +48,7 @@ let rec xsr x : Flx_srcref.t =
 and kind_of_sex sr x : kindcode_t =
   let ki k = kind_of_sex sr k in
   match x with
+  | Lst [Id "ast_name"; sr; Str "LINEAR"; Lst []] ->  KND_linear
   | Lst [Id "ast_name"; sr; Str "TYPE"; Lst []] ->  KND_type
   | Lst [Id "ast_name"; sr; Str "UNITSUM"; Lst []] ->  KND_unitsum
   | Lst [Id "ast_name"; sr; Str "BOOL"; Lst []] ->  KND_bool
@@ -117,14 +118,37 @@ print_endline ("sex2flx:type] " ^ Sex_print.string_of_sex x);
     `TYP_typeop  (xsr sr, name, ti ty, kind_of_sex (xsr sr) kd)
 
  | Lst [Id "typ_implies"; sr; t1; t2] -> `TYP_typeop (xsr sr, "_staticbool_implies", `TYP_type_tuple [ti t1; ti t2], KND_bool)
- | Lst [Id "typ_and"; sr; t1; t2] -> `TYP_typeop (xsr sr, "_staticbool_and", `TYP_type_tuple [ti t1; ti t2], KND_bool)
+ | Lst [Id "typ_and"; sr; t1; t2] -> 
+   (* print_endline ("sex2flx makes staticbool_and from typ_and"); *)
+   `TYP_typeop (xsr sr, "_staticbool_and", `TYP_type_tuple [ti t1; ti t2], KND_bool)
+
  | Lst [Id "typ_or"; sr; t1; t2] -> `TYP_typeop (xsr sr, "_staticbool_or", `TYP_type_tuple [ti t1; ti t2], KND_bool)
  | Lst [Id "typ_not"; sr; t] -> `TYP_typeop (xsr sr, "_staticbool_not", ti t, KND_bool)
  | Lst [Id "typ_true"; sr; t] -> `TYP_typeop (xsr sr, "_staticbool_true", `TYP_type_tuple [], KND_bool)
  | Lst [Id "typ_false"; sr; t] -> `TYP_typeop (xsr sr, "_staticbool_false", `TYP_type_tuple [], KND_bool)
 
- | Lst [Id "typ_andchain"; Lst es] -> `TYP_typeop (sr,"_staticbool_and", `TYP_type_tuple (map ti es), KND_bool)
 
+ (* special constant folding here just to clean up common cases *)
+ | Lst [Id "typ_andchain"; Lst es] -> 
+  (* print_endline ("sex2flx makes staticbool_and from typ_andchain"); *)
+  let tis = map ti es in
+  (* print_endline ("  ** AND Components = "  ^ Flx_util.catmap "," Flx_print.string_of_typecode tis); *)
+  begin try
+    let tis = 
+       filter (fun x -> 
+         match x with 
+         | `TYP_bool true -> false 
+         | `TYP_bool false -> raise Not_found 
+         | _ -> true
+       ) 
+       tis
+    in 
+    match tis with
+    | [] -> `TYP_bool true
+    | [x] -> x
+    | tis -> `TYP_typeop (sr,"_staticbool_and", `TYP_type_tuple tis, KND_bool)
+  with Not_found -> `TYP_bool false
+  end
 
  | Lst [Id "ast_record_type"; Lst rs] ->
    let rs =
@@ -160,9 +184,11 @@ print_endline ("sex2flx:type] " ^ Sex_print.string_of_sex x);
  | Lst [Id "typ_patvar";  sr; Str s] -> `TYP_patvar (xsr sr, s)
  | Lst [Id "typ_patany"; sr] -> `TYP_patany (xsr sr)
  | Lst [Id "ast_void"; sr] -> `TYP_void (xsr sr)
- | Lst [Id "ast_ellipsis"; sr] -> `TYP_ellipsis
+ | Lst [Id "typ_ellipsis"; sr] -> `TYP_ellipsis
  | Lst [Id "typ_arrow";  Lst [e1; e2]] -> `TYP_function (ti e1, ti e2)
  | Lst [Id "typ_effector";  Lst [e1; e2; e3]] -> `TYP_effector (ti e1, ti e2, ti e3)
+ | Lst [Id "typ_lineararrow";  Lst [e1; e2]] -> `TYP_linearfunction (ti e1, ti e2)
+ | Lst [Id "typ_lineareffector";  Lst [e1; e2; e3]] -> `TYP_lineareffector (ti e1, ti e2, ti e3)
  | Lst [Id "typ_longarrow";  Lst [e1; e2]] -> `TYP_cfunction (ti e1, ti e2)
  | Lst [Id "typ_uniq"; sr; e] -> `TYP_uniq (ti e)
 
@@ -176,10 +202,15 @@ print_endline ("sex2flx:type] " ^ Sex_print.string_of_sex x);
 
  | Lst [Id "typ_dual"; sr; e] -> `TYP_dual (ti e)
 
- | Lst [Id "typ_superscript"; t1; t2] -> `TYP_array (ti t1, ti t2)
+ | Lst [Id "typ_array"; t1; t2] -> `TYP_array (ti t1, ti t2)
+ | Lst [Id "typ_compactarray"; t1; t2] -> `TYP_compactarray (ti t1, ti t2)
  | Lst [Id "typ_tuple"; sr; Lst es] -> `TYP_tuple (map ti es)
+ | Lst [Id "typ_intersect"; sr; t1; t2] -> `TYP_intersect [ti t1; ti t2]
+ | Lst [Id "typ_compacttuple"; sr; Lst es] -> `TYP_compacttuple (map ti es)
  | Lst [Id "typ_sum";  sr; Lst es] -> `TYP_sum (map ti es)
+ | Lst [Id "typ_compactsum";  sr; Lst es] -> `TYP_compactsum (map ti es)
  | Lst [Id "typ_rptsum"; sr; d; c] -> `TYP_rptsum (ti d, ti c)
+ | Lst [Id "typ_compactrptsum"; sr; d; c] -> `TYP_compactrptsum (ti d, ti c)
  | Lst [Id "typ_typeof";  sr; e] -> 
    `TYP_typeof (ex e)
 
@@ -326,6 +357,7 @@ print_endline ("Processing ast_name "^xid id^" in xexpr");
 
  
   | Lst [Id "ast_tuple";  sr; Lst es] -> `EXPR_tuple (xsr sr,map (xexpr_t (xsr sr)) es)
+  | Lst [Id "ast_compacttuple";  sr; Lst es] -> `EXPR_compacttuple (xsr sr,map (xexpr_t (xsr sr)) es)
 
 
   | Lst [Id "ast_tuple_cons";  sr; eh; et] -> `EXPR_tuple_cons (xsr sr, xexpr_t (xsr sr) eh, xexpr_t (xsr sr) et)
@@ -365,6 +397,9 @@ print_endline ("Processing ast_name "^xid id^" in xexpr");
      )
      ss
    in `EXPR_remove_fields (xsr sr,ex e, ss)
+
+ | Lst [Id "ast_getall_field"; sr; e; Str s] ->
+   `EXPR_getall_field (xsr sr, ex e, s)
 
  | Lst [Id "ast_variant";  Lst [Str s; e]] -> `EXPR_variant (sr,(s, ex e))
 
@@ -418,6 +453,11 @@ print_endline ("Processing ast_name "^xid id^" in xexpr");
    let rt = ti t in
    let pdef = (* match rt with `TYP_void _ -> `PVar | _ -> *) `PVal in 
    `EXPR_lambda  (xsr sr, (`GeneratedInlineFunction,xvs vs, map (xps pdef) pss, rt, xsts sts))
+
+ | Lst [Id "ast_linearlambda";  sr; Lst [vs; Lst pss; t; sts]] -> 
+   let rt = ti t in
+   let pdef = (* match rt with `TYP_void _ -> `PVar | _ -> *) `PVal in 
+   `EXPR_lambda  (xsr sr, (`LinearFunction,xvs vs, map (xps pdef) pss, rt, xsts sts))
 
  | Lst [Id "ast_object";  sr; Lst [vs; Lst pss; t; sts]] -> 
 
@@ -775,6 +815,7 @@ and xfunkind_t sr x : funkind_t =
 
 and xadjective_t x : property_t =
   match x with
+  | Id "LinearFunction" -> `LinearFunction
   | Id "InlineFunction" -> `Inline
   | Id "NoInlineFunction" -> `NoInline
   | Id "Virtual" -> `Virtual 
@@ -1333,6 +1374,353 @@ print_endline ("Argtypes = " ^ Flx_util.catmap ", " Flx_print.string_of_typecode
     )
     (List.tl revlinks)
 
+  | Lst[Id "objc_bind_class_interface"; sr; stuff; reqs] -> bind_objc_class_interface sr stuff reqs
+  | Lst[Id "objc_bind_protocol_interface"; sr; stuff; reqs] -> bind_objc_protocol_interface sr stuff reqs
+
 
   | x -> err x "statement"
+
+(* ------- OBJC STUFF ------------*)
+
+and decode_keyword_selector sr kws : string list * string * Flx_ast.typecode_t list * Flx_ast.typecode_t =
+    (* print_endline ("Objc keyword selector "); *)
+    let names, types = List.fold_left (fun (names,types) kwp -> match kwp with
+      | Lst [Id "objc_keyword_declarator"; Str name; typ] ->
+        let param_type = xtype_t sr typ in
+        (* print_endline ("  param=" ^ name ^ ":(" ^ Flx_print.string_of_typecode param_type  ^")"); *)
+        
+        name :: names, param_type :: types
+      | x -> err x "objc keyword param"
+      )
+      ([],[])
+      kws
+    in
+    let types = List.rev types in
+    let name = fold_left (fun name part -> part ^ "'" ^ name) "" names in
+    (* print_endline ("Method name = " ^ name); *)
+    let typ = `TYP_tuple types in
+    (* print_endline ("Method argument type = " ^ Flx_print.string_of_typecode typ); *)
+    List.rev names,name,types,typ
+
+
+(* calculate paramater tuple of method, excludes object or class, empty Slist if unit typed argument *)
+and cal_params sr types : parameter_t sexpr_t = 
+  let n = List.length types in
+  let mkparam j : parameter_t = sr, `PVal,  "_" ^ string_of_int (j+2), List.nth types j, None in
+  let param2_list = List.rev (List.fold_left (fun acc j -> mkparam j :: acc) [] (Flx_list.nlist n)) in
+  let paramspec2 : parameter_t sexpr_t = 
+    match param2_list with  
+      | [] -> Slist [] (* unit *)
+      | [p] -> Satom p (* one argument *)
+      | _ -> Slist (List.map (fun p -> Satom p) param2_list) (* multiple arguments *)
+  in 
+  paramspec2
+
+
+and cal_method_decl sr name paramss return_type body =
+    let fun_decl = STMT_curry (sr, name, dfltvs, paramss,(return_type,None), `TYP_tuple[],`Generator,[`Generated "ObjCMethod"],body) in
+    (* print_endline ("  -->> Method binding = " ^ Flx_print.string_of_statement 0 fun_decl); *)
+    fun_decl 
+
+and decode_property_spec classname sr attr var =
+  let readonly = 
+    match attr with
+    | Lst [Lst attrs] -> 
+       List.fold_left (fun result attr -> match attr with | Str "readonly" -> true | _ -> result) false attrs
+    | Lst [] -> false
+    | x -> err x "property attributes"
+  in
+  match var with 
+  | Lst [Id "Pval"; Str name; typ] -> 
+    let typ = xtype_t sr typ in
+
+    (* get method *)
+    let paramspec1 : parameter_t sexpr_t = Satom (sr, `PVal, "_1", `TYP_name (sr,classname,[]), None) in 
+    let paramss = [paramspec1, None] in
+    let obj = `EXPR_name (sr, "_1",[]) in
+    let argument =  obj in
+    let code_string = "[$1 "^name^"]" in
+    let code_spec = Flx_code_spec.Str_template code_string in
+    let body = [STMT_fun_return (sr,`EXPR_expr (sr, code_spec, typ, argument))] in
+    let get_method = cal_method_decl sr name paramss typ body in
+    if readonly then
+      get_method
+    else
+      let paramspec2: parameter_t sexpr_t = Satom (sr, `PVal, "_2", typ, None) in
+      let paramss : params_t list = [paramspec1, None; paramspec2, None] in
+      let argument = `EXPR_tuple (sr, [obj ; `EXPR_name (sr, "_2",[])]) in 
+      let code_string = "[$1 set" ^ name ^ ": $2]" in
+      let code_spec = Flx_code_spec.Str_template code_string in
+      let body = [STMT_code (sr, code_spec, argument)] in
+      let set_method = cal_method_decl sr ("set"^name^"'") paramss (`TYP_void sr) body in
+      STMT_seq (sr, [get_method; set_method])
+
+  | x -> err x "property name and type"
+
+and decode_instance_method_spec objt sr return_spec selector =
+  (* print_endline ("instance method declaration"); *)
+  let return_type = xtype_t sr return_spec in 
+  (* print_endline ("  Return type " ^ Flx_print.string_of_typecode return_type); *)
+
+  begin match selector with
+  | Lst [Id "objc_method_selector_name"; Str name] ->
+    (* print_endline ("No argument method named " ^ name); *)
+    let paramspec1 : parameter_t sexpr_t = Satom (sr, `PVal, "_1", `TYP_name (sr,objt,[]), None) in 
+    let paramss = [paramspec1, None] in
+    let obj = `EXPR_name (sr, "_1",[]) in
+    let argument =  obj in
+    let code_string = "[$1 "^name^"]" in
+    let code_spec = Flx_code_spec.Str_template code_string in
+    let body = 
+      match return_type with
+      | `TYP_name (_,"void",_) -> [STMT_code (sr, code_spec, argument)]
+      | _ -> [STMT_fun_return (sr,`EXPR_expr (sr, code_spec, return_type, argument))] 
+    in
+    let binding = cal_method_decl sr name paramss return_type body in
+    binding
+
+  | Lst [Id "objc_keyword_selector"; Lst kws] ->
+    let names, name, types, typ = decode_keyword_selector sr kws in
+    let paramspec2 = cal_params sr types in
+
+    let paramspec1 : parameter_t sexpr_t = Satom (sr, `PVal, "_1", `TYP_name (sr,objt,[]), None) in 
+    let paramss : params_t list = [paramspec1,None; paramspec2,None] in
+    let obj = `EXPR_name (sr, "_1",[]) in
+    let n = List.length names in
+    let argument =  
+      `EXPR_tuple (sr,obj :: List.map (fun i -> `EXPR_name (sr, "_"^ string_of_int (i+2), [])) (Flx_list.nlist n)) 
+    in
+    let code_string = "[$1 "^(String.concat "" (List.map2 (fun i kw -> kw^":$" ^ string_of_int (i+2)^" ") (Flx_list.nlist n) names))^ "]" in
+    let code_spec = Flx_code_spec.Str_template code_string in
+    let body = 
+      match return_type with
+      | `TYP_name (_,"void",_) -> [STMT_code (sr, code_spec, argument)]
+      | _ -> [STMT_fun_return (sr,`EXPR_expr (sr, code_spec, return_type, argument))] 
+    in
+    let binding = cal_method_decl sr name paramss return_type body in
+    binding 
+
+  | Lst [Id "objc_keyword_selector_ellipsis"; stuff] as x ->
+    (* print_endline ("Objc instance method keyword selector ellipsis not implemented yet"); *)
+    err x "Method with ellipsis not implemented yet"
+
+  | x -> err x "Method Argument types"
+  end
+
+and decode_class_method_spec classname sr return_spec selector = 
+  (* print_endline ("Class method declaration"); *)
+  let return_type = xtype_t sr return_spec in 
+  (* print_endline ("  Return type " ^ Flx_print.string_of_typecode return_type); *)
+
+  begin match selector with
+  | Lst [Id "objc_method_selector_name"; Str name] ->
+    (* print_endline ("No argument method named " ^ name); *)
+    let paramspec2 = Slist [] in
+    let paramss = [paramspec2,None] in
+    let obj = `EXPR_name (sr, classname,[]) in
+    let argument =  obj in
+    let code_string = "["^classname ^" "^name^"]" in
+    let code_spec = Flx_code_spec.Str_template code_string in
+    let argument = `EXPR_tuple (sr,[]) in
+    let body = 
+      match return_type with
+      | `TYP_name (_,"void",_) -> [STMT_code (sr, code_spec, argument)]
+      | _ -> [STMT_fun_return (sr,`EXPR_expr (sr, code_spec, return_type, argument))] 
+    in
+    let binding = cal_method_decl sr (classname^"'"^name) paramss return_type body in
+    binding
+
+  | Lst [Id "objc_keyword_selector"; Lst kws] ->
+    let names, name, types, typ = decode_keyword_selector sr kws in
+    let paramspec2 = cal_params sr types in
+
+    let paramss : params_t list = [paramspec2,None] in
+    let obj = `EXPR_name (sr, classname,[]) in
+    let n = List.length names in
+    let argument =  
+      `EXPR_tuple (sr,obj :: List.map (fun i -> `EXPR_name (sr, "_"^ string_of_int (i+1), [])) (Flx_list.nlist n)) 
+    in
+    let code_string = "["^classname^ "'" ^(String.concat "" (List.map2 (fun i kw -> kw^":$" ^ string_of_int (i+1)^" ") (Flx_list.nlist n) names))^ "]" in
+    let code_spec = Flx_code_spec.Str_template code_string in
+    let body = 
+      match return_type with
+      | `TYP_name (_,"void",_) -> [STMT_code (sr, code_spec, argument)]
+      | _ -> [STMT_fun_return (sr,`EXPR_expr (sr, code_spec, return_type, argument))] 
+    in
+    let binding = cal_method_decl sr (classname^"'"^name) paramss return_type body in
+    binding 
+
+  | Lst [Id "objc_keyword_selector_ellipsis"; stuff] as x ->
+    print_endline ("Objc keyword selector class method ellipsis not implemented yet");
+    err x "Method with ellipsis not implemented yet"
+
+  | x -> err x "Method Argument types"
+  end
+
+and supertype_specification sr super sub =
+  let fname = "_supertype_"^super in
+  let argt = `TYP_name (sr, sub, []) in
+  let ret = `TYP_name (sr,super,[]) in
+  let body = CS.Str_template "$1" in
+  let reqs = RREQ_atom Subtype_req in
+  let prec = "" in
+  let supercoercion = STMT_fun_decl (sr,fname,dfltvs,[argt],ret,body,reqs,prec) in
+  print_endline ("Supercoercion function = " ^ Flx_print.string_of_statement 0 supercoercion);
+  supercoercion
+
+and bind_objc_class_interface sr stuff reqs :Flx_ast.statement_t = 
+  let sr = xsr sr in 
+  let reqs = xraw_req_expr_t sr reqs  in
+  match stuff with
+  | Lst [Id "objc_class_interface"; Str classname; super; protocol_reference_list; instance_variables; interface_declaration] ->
+
+    (* FIND SUPERTYPE *)
+    let super = 
+       match super with
+       | Lst [] -> "NSObject" 
+       | Lst [Lst [Str ":"; Str name]] -> name
+       | x -> err x "obj super class"
+    in
+    (* print_endline ("Objc Class " ^ classname ^ (if super = "" then "" else ": " ^ super)); *)
+
+    (* BIND CLASS TYPE *)
+    let proxy_name = "_derefproxy_" ^ classname in
+    let class_type = STMT_abs_decl (sr, classname, Flx_ast.dfltvs, [], Str (classname^ "*"), reqs) in 
+
+    (* because stupid Felix gives a typedef .. even though the type is never used .. we give it a real type name *)
+    let derefproxy_type = STMT_abs_decl (sr, proxy_name, Flx_ast.dfltvs, [], Str ("void"), reqs) in 
+
+    (* OVERLOAD DEREF OPERATOR *)
+    let deref_operator = STMT_fun_decl (sr,"deref",dfltvs,[`TYP_name (sr, classname, []) ],`TYP_name (sr, proxy_name,[]),CS.Str_template "$1",reqs,"") in
+
+    let protocols = 
+      match protocol_reference_list with
+      | Lst [Lst names] ->
+          List.map (fun super -> let super = xid super in supertype_specification sr super classname ) names
+      | Lst [] -> []
+      | x -> err x "protocol list"
+    in
+
+    (* CONSTRUCT IVAR PROJECTIONS *)
+    let ivar_projections = 
+      match instance_variables with
+      | Lst [Lst ivspecs] ->
+        (* print_endline ("Got instance variable spec list"); *)
+        List.map (fun ivspec -> match ivspec with
+          | Lst [Id "Pval"; Str ivar; typ] -> 
+            let typ = xtype_t sr typ in
+            (* print_endline ("Instance variable " ^ ivar ^ ", type=" ^ Flx_print.string_of_typecode typ); *)
+
+            (* Pointer projection: our type is an abstract pointer! *)
+            let fname = ivar in
+            let argt = `TYP_name (sr, classname, []) in
+            let ret = `TYP_pointer typ in
+            let body = CS.Str_template ("&($1->"^ivar ^")") in (* MACHINE POINTER! *)
+            let reqs = RREQ_true in
+            let prec = "" in
+            let pointer_projection = STMT_fun_decl (sr,fname,dfltvs,[argt],ret,body,reqs,prec) in
+            (* print_endline ("ivar pointer projection = " ^ Flx_print.string_of_statement 0 pointer_projection); *)
+
+            (* value projection using phantom proxy type *)
+            let argt = `TYP_name (sr, proxy_name,[]) in
+            let ret =  typ in
+            let body = CS.Str_template ("$1->"^ivar) in
+            let value_projection = STMT_fun_decl (sr,fname,dfltvs,[argt],ret,body,reqs,prec) in
+            (* print_endline ("ivar value projection = " ^ Flx_print.string_of_statement 0 value_projection); *)
+            STMT_seq (sr, [value_projection; pointer_projection])
+   
+          | x -> err x "Objc instance variable spec, expected ivar decl or vis spec"
+        ) 
+        ivspecs
+
+      | Lst [] -> (* print_endline "Optional instance variable spec list omitted"; *) []
+      | x -> err x "objc instance variables"
+    in
+
+    (* BIND METHODS *)
+    let iface_decl = 
+      match interface_declaration with
+      | Lst [] -> 
+        (* print_endline ("Optional interface spec ommitted"); *)
+        STMT_nop (sr, "Omitted optional interface spec")
+
+      | Lst ifaces ->
+        (* print_endline ("Got interface spec"); *)
+        let methods = 
+          List.map (fun ispec -> match ispec with
+          | Lst [Id "objc_class_method_declaration"; sr; typ; selector] ->  
+            (* print_endline ("Class method declaration"); *)
+            let sr = xsr sr in
+            decode_class_method_spec classname sr typ selector
+
+          | Lst [Id "objc_instance_method_declaration"; sr; typ; selector ] ->
+            (* print_endline ("Instance method declaration"); *)
+            let sr = xsr sr in
+            decode_instance_method_spec classname sr typ selector
+
+          | Lst [Id "objc_property"; sr; property_attributes; var] -> 
+            let sr = xsr sr in
+            decode_property_spec classname sr property_attributes var 
+
+          | x -> err x "Objc interface element"
+        )
+        ifaces
+        in
+        let supercoercion = supertype_specification sr super classname in
+        STMT_seq (sr,class_type :: supercoercion :: derefproxy_type :: deref_operator ::  protocols @ ivar_projections @ methods)
+
+      | x -> err x "objc interface"
+   in
+   iface_decl
+
+  | x -> err x "objc bind class interface"
+
+and bind_objc_protocol_interface sr stuff reqs :Flx_ast.statement_t = 
+  let sr = xsr sr in 
+  let reqs = xraw_req_expr_t sr reqs  in
+  match stuff with
+  | Lst [Id "objc_protocol_interface"; Str classname; protocol_reference_list; interface_declaration] ->
+    print_endline ("Objc Protocol " ^ classname);
+
+    (* A protocol is an incomplete type, so we just use C struct tag for the binding *)
+    let class_type = STMT_abs_decl (sr, classname, Flx_ast.dfltvs, [], Str ("struct " ^ classname^ "*"), reqs) in  
+    let protocols = 
+      match protocol_reference_list with
+      | Lst [Lst names] ->
+          List.map (fun super -> let super = xid super in supertype_specification sr super classname ) names
+      | Lst [] -> []
+      | x -> err x "protocol list"
+    in
+    let iface_decl = 
+      match interface_declaration with
+      | Lst ifaces ->
+        (* print_endline ("Got interface spec"); *)
+        let methods = 
+          List.map (fun ispec -> match ispec with
+            | Lst [Id "objc_class_method_declaration"; sr; typ; selector] ->  
+              (* print_endline ("Class method declaration"); *)
+              let sr = xsr sr in
+              decode_class_method_spec classname sr typ selector
+
+            | Lst [Id "objc_instance_method_declaration"; sr; typ; selector ] ->
+              (* print_endline ("Instance method declaration"); *)
+              let sr = xsr sr in
+              decode_instance_method_spec classname sr typ selector
+
+            | Lst [Id "objc_property"; property_attribues; var] -> 
+              print_endline ("Property declaration not implemented in protocols yet");
+              STMT_nop (sr, "property decl not implemented yet")
+
+            | x -> err x "Objc interface element"
+          )
+          ifaces
+        in
+        STMT_seq (sr,class_type :: protocols @ methods)
+
+      | x -> err x "objc interface"
+   in
+   iface_decl
+
+  | x -> err x "objc bind protocol interface"
+
 

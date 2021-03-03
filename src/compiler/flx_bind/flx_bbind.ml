@@ -454,7 +454,10 @@ print_endline ("Join: binding executable instructions");
     let ft =
       if mem `Cfun props
       then btyp_cfunction (d,brt)
-      else btyp_effector (d,beffects,brt)
+      else 
+        if mem `LinearFunction props 
+        then btyp_lineareffector (d,beffects,brt) 
+        else btyp_effector (d,beffects,brt) 
     in
 
     (* Cache the type of the function. *)
@@ -474,19 +477,32 @@ print_endline ("Join: binding executable instructions");
     add_bsym true_parent bbdcl
 
   | SYMDEF_parameter (k,_) ->
+    let name = sym.Flx_sym.id in
 (*
-print_endline "BINDING PARAMETER";
+print_endline ("BINDING PARAMETER " ^ name);
 *)
     begin match sym_parent with
     | None -> failwith "[bbind_sym] expected parameter to have a parent"
     | Some ip ->
-      match hfind "bbind" state.sym_table ip with
+      let sym = hfind "bbind" state.sym_table ip in
+      let linear = match sym with
+      | { Flx_sym.symdef=SYMDEF_function (params,ret,effect,props,_)} -> List.mem `LinearFunction props 
+      | _ -> false
+      in
+      match sym with
       | { Flx_sym.symdef=SYMDEF_reduce _}
       | { Flx_sym.symdef=SYMDEF_axiom _}
       | { Flx_sym.symdef=SYMDEF_lemma _}
       | { Flx_sym.symdef=SYMDEF_function _}
         ->
         let t = type_of_index symbol_index in
+        let t = if linear then 
+          begin
+           (* print_endline ("Linear type for parameter "^name^ " of " ^ sym.Flx_sym.id);  *)
+           btyp_uniq t
+          end
+          else t 
+        in
         let bbdcl = match k with
         | `POnce -> bbdcl_val (bvs,t,`Once)
         | `PVal ->  
@@ -691,104 +707,21 @@ print_endline ("Flx_bbind: Adding type of index " ^ si symbol_index ^ " to cache
 (*
 print_endline ("Binding callback " ^ sym.Flx_sym.id ^ " index=" ^ string_of_bid symbol_index);
 *)
-    let bret = bt ret in
-
-    (* The type of the raw C function's arguments,
-      using address = void* for the callback.
-      This is the one passed to C, and the one we generate
-      to cast the address to a Felix type and then execute it.
-
-      Note the hack .. binding to C_hack::address .. it isn't
-      necessary because we know it's a void*, but there is no
-      builtin symbol for that.
-
-      This is the function the user must call to actually
-      invoke the Felix callback passed to it.
-
-      A callback is much like an exported function,
-      in that it binds a function to some arguments
-      from a C call, however it is passed a closure,
-      whereas exported functions create their own.
-
-      This function isn't type safe to call at the C
-      level, but it has the correct type to PASS to
-      the usual establishing functions (or pointer to
-      function in a struct)
-
-      this is an extern "C" function with the original
-      name. The name isn't mangled, and so shouldn't
-      conflict with the typesafe ts_cf below.
-    *)
-    let client_data_pos = ref (-1) in
-    let ts_c =
-      let counter = ref 0 in
-      map
-      (function
-        | `TYP_name (_,id,[]) when id = sym.Flx_sym.id ->
-          if !client_data_pos = -1 then
-            client_data_pos := !counter
-          ;
-          let address = `TYP_name (sym.Flx_sym.sr, "address", []) in
-          bt address
-        | t -> incr counter; bt t
-      )
-      ts_orig
-    in
-
-    (* The type of the arguments of the Felix callback function,
-      which are the same as the C function, but with the client
-      data pointer dropped
-    *)
-    let ts_f =
-      map bt
-      (
-        filter
-        (function
-          | `TYP_name (_,id,[]) when id = sym.Flx_sym.id -> false
-          | t -> true
-        )
-        ts_orig
-      )
-    in
-    let tf_args = match ts_f with
-      | [x] -> x
-      | lst -> btyp_tuple lst
-    in
-    let tf = btyp_function (tf_args, bret) in
-
-    (* The type of the arguments Felix thinks the raw
-       C function has on a call. A closure of this
-       function is a Felix function .. NOT the raw
-       C function.
-    *)
-    let ts_cf =
-      map
-      (function
-        | `TYP_name (_,id,[]) when id = sym.Flx_sym.id -> tf
-        | t -> bt t
-      )
-      ts_orig
-    in
-
+    let client_data_pos, bret, ts_c, ts_cf, tc, tcf = 
+       Flx_callback.cal_callback_types bsym_table bt state.counter sym.Flx_sym.sr sym.Flx_sym.id ts_orig ret 
+    in 
     let prec = "postfix" in
 
-    (* Cache the type of the callback. *)
-    (* JS: HUMM .. why is the counter passed to fold? *)
-    (* Ans: because folding requires alpha conversion which requires
-     * fresh names for type variables
-     *)
     if not (Hashtbl.mem state.ticache symbol_index) then begin
-      let t = Flx_fold.fold bsym_table state.counter (btyp_cfunction (btyp_tuple ts_cf, bret)) in
 if debug then
-print_endline ("Flx_bbind: Adding type of index " ^ si symbol_index ^ " to cache, type=" ^ Flx_btype.st t);
-      Hashtbl.add state.ticache symbol_index t
+print_endline ("Flx_bbind: Adding type of index " ^ si symbol_index ^ " to cache, type=" ^ Flx_btype.st tcf);
+      Hashtbl.add state.ticache symbol_index tcf
     end;
 
     if state.print_flag then begin
-      let atyp = btyp_tuple ts_cf in
       print_endline ("//bound callback fun " ^ sym.Flx_sym.id ^ "<" ^
         string_of_bid symbol_index ^ ">" ^ print_bvs bvs ^ ":" ^
-        sbt bsym_table (btyp_function (atyp, bret)))
+        sbt bsym_table tcf)
     end;
 
     add_bsym true_parent (bbdcl_external_fun (
@@ -798,7 +731,7 @@ print_endline ("Flx_bbind: Adding type of index " ^ si symbol_index ^ " to cache
       bret,
       (bind_reqs reqs),
       prec,
-      `Callback (ts_c,!client_data_pos)))
+      `Callback (ts_c,client_data_pos)))
 
   | SYMDEF_union (cs) ->
     if state.print_flag then
@@ -1257,15 +1190,6 @@ print_endline ("[flx_bbind] bind_symbol " ^ sym.Flx_sym.id ^ "??");
 (*
 print_endline ("[flx_bbind] bind_symbol " ^ sym.Flx_sym.id ^ "??");
 *)
-      begin match sym.Flx_sym.symdef with
-      | Flx_types.SYMDEF_function ((Satom (psr,kind,pid,`TYP_defer _,_),None),ret,effects,props,exes) ->
-print_endline ("[flx_bbind] bind_symbol FUNCTION " ^ sym.Flx_sym.id ^ " .. DEFERED");
-        defered := i :: !defered
-      | Flx_types.SYMDEF_parameter (kind,`TYP_defer _) ->
-print_endline ("[flx_bbind] bind_symbol PARAMETER " ^ sym.Flx_sym.id ^ " .. DEFERED");
-        defered := i :: !defered
- 
-      | _ -> 
 (*
 print_endline ("[flx_bbind] bind_symbol " ^ sym.Flx_sym.id ^ " .. BINDING: calling BBIND_SYMBOL");
 print_endline ("Binding symbol " ^ symdef.Flx_sym.id ^ "<" ^ si i ^ ">"); 
@@ -1277,7 +1201,6 @@ print_endline ("Binding symbol " ^ symdef.Flx_sym.id ^ "<" ^ si i ^ ">");
             string_of_bid i ^ " parent " ^ (match parent with | None -> "NONE" | Some p -> string_of_int p))
         with Not_found ->
           failwith ("Binding error, Not_found thrown binding unknown id with index " ^ string_of_bid i)
-      end
     end;
     incr counter
   done

@@ -1,0 +1,356 @@
+// Binder for Xcode SDKs
+var debug = true;
+
+fun / (a:string, b:string) => Filename::join (a,b);
+
+var xcode_sdks = 
+  "/Applications/Xcode.app/Contents/Developer/Platforms" / 
+  "MacOSX.platform/Developer/SDKs"
+;
+
+val cf_dev_dir = 
+ xcode_sdks / "MacOSX.sdk"/
+  "System/Library/Frameworks" / 
+  "CoreFoundation.framework/Headers"
+;
+
+fun dotless (s:string): bool => s not in (".","..");
+
+println$ "DIR: " + cf_dev_dir;
+
+var headers : list[string] = 
+  match Directory::filesin cf_dev_dir with 
+  | None => fun_fail[list[string]] ("NO FILES IN " + cf_dev_dir)
+  | Some s => s
+  endmatch
+;
+
+headers = List::filter dotless headers;
+
+for hdr in headers do
+  println$ "  " + hdr;
+done
+
+proc skip_white(p: &(+char)) {
+skipw:>
+  while **p <= char ' ' perform pre_incr p;
+
+  if **p == char "/" and *(*p+1) == char "*" do
+    pre_incr p;
+    pre_incr p;
+skipc:>
+    if **p == char "*" and *(*p+1) == char "/" do
+      pre_incr p;
+      pre_incr p;
+      goto skipw;
+    else
+     pre_incr p;
+     goto skipc;
+    done
+  done
+  return; 
+}
+
+// precondition: starts on non-white
+// postcondition: ends on non-white
+proc get_name(p: &(+char), ps:&string) {
+  var name = "";
+  while iscidcont(**p) do
+    name += **p;
+    pre_incr p;
+  done
+  ps <- *ps + name;
+  skip_white p;
+}
+
+proc get_type(p: &(+char), typ:&string) {
+//  println$ "** get type";
+  skip_white p;
+
+  // ellipsis
+  if **p == char "."  do 
+    if *(*p+1) == char "." do 
+      if *(*p+2) == char "." do
+        typ <- "...";
+        +=(p,3);
+        return;
+      done
+    done
+  done
+
+base:>
+  var name = "";
+  get_name (p,&name);
+// println$ "** base = " + name;
+  skip_white p;
+
+  if name in ("const", "struct") do // KEEP
+    +=(typ,name + " ");
+    goto base;
+  done
+
+  if name in ("_Nullable", "_Null_unspecified") do // DROP
+    goto base;
+  done
+
+  +=(typ,name + " ");
+  
+// at this point we have the base type
+// now look for pointer stuff
+
+// println$ "** Final base = " + *typ;
+
+ptrs:>
+  while **p == "*" do // KEEP
+    += (typ,"*");
+    pre_incr p;
+    skip_white p;
+  done
+
+// look ahead to next symbol
+lookahead:>
+  var q = *p;
+  name = "";
+  get_name(&q, &name);
+// println$ "Lookahead gets "+name;
+  if name in ("char", "short", "int", "long") do
+     +=(typ, " " + name);
+     p <- q;
+     goto ptrs;
+  elif name in ("_Null_unspecified", "_Nullable") do
+    p <- q;
+    goto ptrs; // drop
+  elif name == "const" do
+    += (typ, " const");
+    p <- q;
+    goto ptrs;
+  done
+
+// parameter name, not type, drop for rescan
+// println$ "** Final type = " + *typ;
+  return;
+}
+
+proc get_type_and_name(p: &(+char), typ:&string, name:&string) {
+  get_type (p,typ);
+again:>
+  get_name (p,name);
+
+  if *name == "long" do
+    +=(typ,"long");
+    skip_white p;
+    name <- "";
+    goto again;
+
+  elif *name in ("_Null_unspecified","CF_NOESCAPE", "CF_RELEASES_ARGUMENT", "_Nullable") do // DROP
+    skip_white p;
+    goto again;
+  done
+
+  if **p == char "[" do
+    pre_incr p;
+    if **p != char "]" do
+      println$ "ERROR, expected ']', got '"+*p+"'";
+      System::abort;
+    done
+    pre_incr p;
+    +=(typ,"[]");
+  done
+ 
+// println$ "++ Complete type = " + *typ + ", Param name = " + *name; 
+// println$ " ";
+  return;
+}
+
+proc skip_balanced_parens (p: &(+char)) {
+  var level = 0;
+again:>
+  if **p == char "(" do 
+    pre_incr p;
+    ++level;
+    goto again;
+  elif **p == char ")" do
+    pre_incr p;
+    --level;
+    if level == 0 do 
+      skip_white p;
+      return;
+    done
+    goto again;
+  else
+    pre_incr p;
+    goto again;
+  done
+}
+
+proc parse_params (p: &(+char), ps: &list[string * string]) {
+  var ptyp= "";
+  var pname= "";
+again:>
+  get_type_and_name (p,&ptyp, &pname);
+  ps <- *ps + (ptyp, pname);
+  if **p == char "," do
+    pre_incr p;
+    skip_white p;
+    ptyp, pname = "","";
+    goto again;
+  done
+  return;
+}
+
+enum kind_t = Const_k, Fun_k, Unk_k;
+
+variant sig_t = 
+| Constant of string * string /* name, type */
+| Function of string * string * list[string] /* name, return type, parameter types */
+| Bad of string // the bad line
+;
+ 
+fun parse_api(var s:string) : sig_t {
+  var p = s&.stl_begin;
+
+  // get return type
+  var ret = "";
+  var name = "";
+  var params = Empty[string * string];
+  var kind = Const_k;
+  get_type_and_name (&p, &ret, &name);
+
+  skip_white &p;
+
+fix_kind:>
+
+  if *p == char ";" do
+    match kind with
+    | Unk_k => 
+      println$ "++++ CANNOT PARSE '"+p+"'";
+      System::abort;
+      return Bad s;
+
+    | Const_k => 
+if debug perform println$ "    Constant type " + ret;
+if debug perform println$ "    Constant Name " + name;
+      return Constant (name, ret);
+
+    | Fun_k =>
+if debug perform println$ "    Function type " + ret;
+if debug perform println$ "    Function Name " + name;
+      var psigs = Empty[string];
+      for param in params do
+        var ptyp = param.0;
+        var pname = param.1;
+if debug perform println$ "        param= '" + ptyp + "' '" + pname+"'";
+        psigs += ptyp;
+      done 
+    endmatch;
+    return Function (name, ret, psigs);
+  done
+
+  if *p == char "(" do
+    kind = Fun_k;
+    ++p;
+    parse_params (&p, &params);
+    if *p == char ")" do
+      ++p;
+    else
+      println$ "ERROR, expected ')' at '" + p + "'"; 
+      System::abort;
+    done
+  else
+    kind = Const_k;
+  done
+
+  var api_avail = "";
+  get_name(&p,&api_avail);
+//println$ "API AVAILABILITY = '"  + api_avail + "'";
+  if api_avail in ("API_AVAILABLE", "API_UNAVAILABLE", "API_DEPRECATED") do
+    skip_balanced_parens &p;
+  done
+  goto fix_kind; 
+  
+}
+
+fun translate_type (t: string) : string {
+  match strip t with
+  | "const char *" => return "+char";
+  | "const void *" => return "address";
+  | "void *[]" => return "+address";
+  | "Boolean" => return "bool";
+  | "UInt8" => return "uint8";
+  | "UInt32" => return "uint32";
+  | "SInt32" => return "int32";
+  | t => 
+    var n = t.len.int;
+    if t.(n - 1) == char "*" return "&" + translate_type t.(..<n - 1) ;
+    return t;
+  endmatch;
+}
+
+fun translate_params (ps: list[string]) : string {
+if debug perform println$ "translating ps=" + ps.str;
+  return match ps with
+  | Empty => "unit"
+  | (["void "]) => "unit"
+  | ps => catmap " * " translate_type ps
+  endmatch;
+}
+
+fun translate_sig (sig:sig_t) {
+  return match sig with
+  | Bad s => 
+    "  //#### BAD: " + s
+
+  | Constant (name, typ) => 
+    "  const " + name + ": " + translate_type typ + ";"
+
+  | Function (name, "void ", ps) =>
+    "  proc " + name + ": " + translate_params  ps + ";"
+
+  | Function (name, ret,ps) =>
+    "  fun " + name + ": " + translate_params ps + 
+      " -> " + translate_type ret + ";"
+  endmatch;
+}
+
+fun process_header (d:string) (h:string) {
+  var cls = h.(..< h.len.int - 2);
+  var out = Empty[string];
+  proc emit (s:string) { out += s; if debug perform println$ s;}
+  emit$ '//'+ "*"* 20;
+  emit$ "// Header " + d/h;
+  emit$ '//'+"*" * 20;
+  emit$ "";
+  emit$ "open class " + cls + "{";
+
+  var data = load (d/h);
+  var lines = split (data, char "\n");
+  var count = 1;
+  var api = false;
+  for line in lines do
+    var n = line.len.int;
+    //println$ (f"%3d " count) + line;
+    if prefix (line,"#include <CoreFoundation/") do
+      var ihdr = line.(25 ..< n - 3);
+      emit$ '  include "./' + ihdr + '";';
+    elif api do
+      println$ (f"\n// %3d " count) + "API " + line;
+      emit$ (f"\n  // %3d " count) + "API " + line;
+      var sig = parse_api line;
+      emit$ translate_sig sig; // later write to file!
+    done
+    api = line == "CF_EXPORT";
+    ++count;
+  done
+  emit$ "} // class " + cls;
+  return out;  
+}
+
+
+FileSystem::rm("CFtmp");
+Directory::mkdirs("CFtmp");
+for hdr in headers do
+println$ "Processing " + hdr;
+  var lines = process_header cf_dev_dir hdr;
+  var cls = hdr.(..< hdr.len.int - 2);
+  save ("CFtmp" / cls + ".flx", lines);
+done

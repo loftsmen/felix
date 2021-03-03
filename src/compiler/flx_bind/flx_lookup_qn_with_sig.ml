@@ -94,10 +94,8 @@ in
       | SYMDEF_cstruct _
       | SYMDEF_struct _ ->
         let sign = try List.hd signs with _ -> assert false in
-        (*
         print_endline ("Lookup qn with sig' found a struct "^ id ^
         ", looking for constructor"); 
-        *)
         (* this doesn't work, we need to do overload resolution to
            fix type variables
         let t = type_of_index_with_ts' state bsym_table rs sra index ts in
@@ -268,6 +266,7 @@ print_endline ("LOOKUP 1: varname " ^ si index);
             )
       | _ -> clierrx "[flx_bind/flx_lookup.ml:2525: E130] " sr "Case requires exactly one argument"
       end
+    | BTYP_compactsum ls
     | BTYP_sum ls ->
       if v<0 || v >= List.length ls
       then clierrx "[flx_bind/flx_lookup.ml:2529: E131] " sra "Case index out of range of sum"
@@ -288,6 +287,7 @@ print_endline ("LOOKUP 1: varname " ^ si index);
       | _ -> clierrx "[flx_bind/flx_lookup.ml:2544: E133] " sr "Case requires exactly one argument"
       end
 
+    | BTYP_compactrptsum (BTYP_unitsum k, vt)
     | BTYP_rptsum (BTYP_unitsum k, vt) ->
       begin match signs with
       | [argt] -> 
@@ -325,11 +325,16 @@ print_endline ("lookup_qn_with_sig' [AST_name] " ^ name ^ ", sigs=" ^ catmap ","
     let ts = List.map (bt sr) ts in
     begin
       try
-        lookup_name_with_sig
+        let result = lookup_name_with_sig
           state
           bsym_table
           sra srn
           env env rs name ts signs
+        in
+(*
+        print_endline ("[AST_name] lookup_name_with_sig got type " ^ Flx_print.sbt bsym_table (snd result));
+*)
+        result
       with
       | Free_fixpoint _ as x -> 
 (*
@@ -437,7 +442,7 @@ print_endline ("AST_index (nonfunction): "^name^"=T<"^string_of_int i^">");
 print_endline ("Lookup qn with sig: AST_lookup of " ^ name ^ " in " ^ string_of_expr qn');
 *)
     let m =  eval_module_expr state bsym_table env qn' in
-    match m with (Flx_bind_deferred.Simple_module (impl, ts',htab,dirs)) ->
+    match m with (Flx_eval_module.Simple_module (impl, ts',htab,dirs)) ->
     (* let n = List.length ts in *)
     let ts = List.map (bt sr)( ts' @ ts) in
     (*

@@ -34,19 +34,27 @@ let var_occurs bsym_table t =
     | BTYP_type_set ls
     | BTYP_type_set_intersection ls
     | BTYP_type_set_union ls
+    | BTYP_compactsum ls
     | BTYP_sum ls
     | BTYP_inst (_,ls,_)
     | BTYP_vinst (_,ls,_)
+    | BTYP_compacttuple ls 
+    | BTYP_intersect ls
     | BTYP_tuple ls -> List.iter aux ls
 
     | BTYP_record (ls) -> List.iter (fun (s,t) -> aux t) ls
     | BTYP_polyrecord (ls,s,v) -> List.iter (fun (s,t) -> aux t) ls; aux v
     | BTYP_variant ls -> List.iter (fun (s,t) -> aux t) ls
 
+    | BTYP_compactrptsum (a,b)
+    | BTYP_compactarray (a,b)
     | BTYP_rptsum (a,b)
     | BTYP_array (a,b)
+    | BTYP_linearfunction (a,b) -> aux a; aux b
     | BTYP_function (a,b) -> aux a; aux b
+    | BTYP_lineareffector (a,e,b) -> aux a; aux e; aux b
     | BTYP_effector (a,e,b) -> aux a; aux e; aux b
+
     | BTYP_cfunction (a,b) -> aux a; aux b
 
     | BTYP_ptr (_,t,ts)  -> aux t; List.iter aux ts
@@ -54,6 +62,8 @@ let var_occurs bsym_table t =
 
     | BTYP_uniq a -> aux a
 
+    | BTYP_instancetype _
+    | BTYP_ellipsis
     | BTYP_label
     | BTYP_unitsum _
     | BTYP_void

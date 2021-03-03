@@ -1,0 +1,64 @@
+include "std/apple/Foundation";
+
+open syntax ObjC;
+ @objc-bind
+  @interface Sub // : Super 
+/*    {
+      @public NSString s;
+    }
+  @property (weak,readonly) A B;
+  @property (fred = joe) A B;
+  @property (maxine = jean:) D E;
+
+  + (NSString) cmeth;
+*/
+
+  + (Sub) alloc;
+  - (Sub) init;
+  - (int) imeth;
+  - (void) xWith: (int) yWith: (NSString);
+  - (int) xWith: (int) yWith: (NSString) zThing:(double);
+  @end
+
+println$ "Hello World ";
+
+header small_class_interface = c"""
+@interface SmallClass: NSObject { }
+- (int)get1977;
+@end
+""";
+
+body small_class_implementation = c"""
+@implementation SmallClass
+- (instancetype)init {
+	self = [super init];
+	return self;
+}
+- (int)get1977 {
+	return 1977;
+}
+- (int)getsum: (int)toadd {
+  return 1977 + toadd;
+}
+
+@end
+""";
+
+requires small_class_interface, small_class_implementation, package "foundation", package "ObjC";
+
+ @objc-bind @interface SmallClass
+ +(SmallClass)alloc;
+ -(SmallClass)init;
+ -(int)get1977;
+ -(int)getsum:(int);
+ @end
+
+var sc : SmallClass = cexpr[SmallClass] "[[SmallClass alloc] init]" endcexpr;
+println$ "Get: " + (sc.get1977()) . str ;
+println$ "Add: " + (sc.getsum' 42) . str ;
+
+var sc2 : SmallClass = (SmallClass'alloc ()).init ();
+println$ "Get: " + (sc2.get1977()) . str ;
+println$ "Add: " + (sc2.getsum' 42) . str ;
+
+

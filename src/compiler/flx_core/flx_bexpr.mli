@@ -9,8 +9,8 @@ type bexpr_t = private
   | BEXPR_rref of bid_t * Flx_btype.t list
   | BEXPR_wref of bid_t * Flx_btype.t list
 
-  | BEXPR_cltpointer of Flx_btype.t * Flx_btype.t * t * int 
-  | BEXPR_cltpointer_prj of Flx_btype.t * Flx_btype.t * int
+  | BEXPR_cltpointer of Flx_btype.t * Flx_btype.t * t * int list 
+  | BEXPR_cltpointer_prj of Flx_btype.t * Flx_btype.t * int list
 
   | BEXPR_uniq of t
   | BEXPR_likely of t
@@ -25,9 +25,11 @@ type bexpr_t = private
   | BEXPR_apply_stack of bid_t * Flx_btype.t list * t
   | BEXPR_apply_struct of bid_t * Flx_btype.t list * t
   | BEXPR_tuple of t list
+  | BEXPR_compacttuple of t list
   | BEXPR_record of (string * t) list
   | BEXPR_polyrecord of (string * t) list * t
   | BEXPR_remove_fields of t * string list
+  | BEXPR_getall_field of t * string
   | BEXPR_closure of bid_t * Flx_btype.t list
   | BEXPR_identity_function of Flx_btype.t
   | BEXPR_case of int * Flx_btype.t
@@ -62,6 +64,7 @@ and t = bexpr_t * Flx_btype.t
 val complete_check : string -> Flx_btype.t  -> Flx_btype.t
 val complete_check_list : Flx_btype.t list -> Flx_btype.t list
 val bexpr_lambda : bid_t -> Flx_btype.t -> t -> t
+val bexpr_linearlambda : bid_t -> Flx_btype.t -> t -> t
 val bexpr_cond :
   t ->
   t -> t -> t
@@ -99,7 +102,7 @@ val bexpr_uniq: t -> t
 val bexpr_cltpointer_of_pointer:
   t -> t
 val bexpr_cltpointer:
-  Flx_btype.t -> Flx_btype.t -> t -> int -> t
+  Flx_btype.t -> Flx_btype.t -> t -> int list -> t
 
 val bexpr_likely : t -> t
 val bexpr_unlikely : t -> t
@@ -121,6 +124,7 @@ val bexpr_apply_stack :
 val bexpr_apply_struct :
   Flx_btype.t -> bid_t * Flx_btype.t list * t -> t
 val bexpr_tuple : Flx_btype.t -> t list -> t
+val bexpr_compacttuple : Flx_btype.t -> t list -> t
 val bexpr_coerce : t * Flx_btype.t -> t
 val bexpr_reinterpret_cast : t * Flx_btype.t -> t
 val bexpr_prj : int -> Flx_btype.t -> Flx_btype.t -> t
@@ -130,7 +134,7 @@ val bexpr_rprj :
   string -> Flx_btype.t -> Flx_btype.t -> t
 
 val bexpr_cltpointer_prj:
-  Flx_btype.t -> Flx_btype.t -> int -> t
+  Flx_btype.t -> Flx_btype.t -> int list -> t
 
 
 val bexpr_record : (string * t) list -> t
@@ -139,6 +143,7 @@ val cal_removal :
   (string * Flx_btype.t) list ->
   string list -> (string * (t)) list
 val bexpr_remove_fields : t -> string list -> t
+val bexpr_getall_field : t -> string -> t
 val bexpr_polyrecord : (string * t) list -> t -> t
 val bexpr_variant : Flx_btype.t -> string * t -> t
 val bexpr_aprj : t -> Flx_btype.t -> Flx_btype.t -> t
@@ -196,4 +201,5 @@ val map :
 val reduce : t -> t
 
 val contains_uniq : t -> bool
+val show_bexpr : t -> string
  

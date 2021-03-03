@@ -1,0 +1,461 @@
+@tangler objc.fpc                  = $PWD/src/config/macosx/objc.fpc
+@tangler foundation.fpc            = $PWD/src/config/macosx/foundation.fpc
+@tangler appkit.fpc                = $PWD/src/config/macosx/appkit.fpc
+@tangler cocoa.fpc                 = $PWD/src/config/macosx/cocoa.fpc
+@tangler corefoundation.fpc        = $PWD/src/config/macosx/corefoundation.fpc
+@tangler audiounit.fpc             = $PWD/src/config/macosx/audiounit.fpc
+@tangler coreaudio.fpc             = $PWD/src/config/macosx/coreaudio.fpc
+@tangler audiotoolbox.fpc          = $PWD/src/config/macosx/audiotoolbox.fpc
+
+
+@tangler AppleOS.flx               = share/lib/std/apple/AppleOS.flx
+@tangler Foundation.flx            = share/lib/std/apple/Foundation.flx
+@tangler AppKit.flx                = share/lib/std/apple/AppKit.flx
+@tangler Cocoa.flx                 = share/lib/std/apple/Cocoa.flx
+@tangler AudioUnit.flx             = share/lib/std/apple/AudioUnit.flx
+
+
+@title Apple Specific Config
+@h1 Apple Frameworks
+
+@tangle Foundation.flx
+open class Foundation
+{
+  requires 
+    package "objc",
+    package "foundation"
+  ;
+
+  // Data types
+  type id = "id";
+
+  type NSObject = "NSObject*";
+  supertype id : NSObject = "$1";
+  fun description : NSObject -> NSString = "[$1 description]";
+
+  type NSString = "NSString*";
+  supertype NSObject : NSString = "$1";
+  instance Str[NSString] {
+    fun str : NSString -> string = "::std::string([$1 cStringUsingEncoding:NSUTF8StringEncoding])";
+  }
+
+  type NSNumber = "NSNumber*";;
+  supertype NSObject : NSNumber = "$1";
+
+
+  type NSArray = "NSArray*";
+  supertype NSObject : NSArray = "$1";
+  ctor[N:UNITSUM] NSArray : NSObject^N = "[NSArray arrayWithObjects:$a,nil]";
+
+  // Selector
+  type SEL = "SEL";
+  fun sel_getName : SEL  -> +char = "sel_getName($1)";
+
+  instance Str[SEL] {
+    fun str (sel: SEL) : string  => string (sel_getName sel);
+  } 
+  fun selector : string -> SEL = '@@selector($i)';
+ 
+  // Debug output
+  proc NSLog : NSString * ... = 'NSLog($a);';
+  proc NSLog[T] : T = 'NSLog(@@"%@@",$1);';
+}
+@
+
+@tangle AppleOS.flx
+open class AppleOS {
+  type OSStatus= "OSStatus";
+  const noErr: OSStatus = "noErr";
+  typedef OSType = uint;
+  instance Eq[OSStatus] { 
+    fun == : OSStatus * OSStatus -> bool = "$1==$2";
+  }
+}
+@
+
+@tangle AudioUnit.flx
+include "std/apple/AppleOS";
+open class AudioUnitAPI {
+  requires package "audiounit";
+
+  // We're not using this here so I'll just provide a binding with no access methods
+  type AudioTimeStamp = "AudioTimeStamp";
+
+  // binds to C type of same name, defines
+  // the enumeration constants,
+  // and provides equality (needed for pattern matches)
+  // and also all standard C bitwise operations
+  cflags AudioUnitRenderActionFlags = 
+    kAudioUnitRenderAction_PreRender,
+    kAudioUnitRenderAction_PostRender,
+    kAudioUnitRenderAction_OutputIsSilence,
+    kAudioOfflineUnitRenderAction_Preflight,
+    kAudioOfflineUnitRenderAction_Render,
+    kAudioOfflineUnitRenderAction_Complete,
+    kAudioUnitRenderAction_PostRenderError,
+    kAudioUnitRenderAction_DoNotCheckRenderArgs
+  ;
+   
+
+
+  // Manually define this structure too
+  type AudioBuffer = "AudioBuffer";
+  fun mDataByteSize : AudioBuffer -> uint32 = "$1.mDataByteSize";
+  fun mNumberChannels : AudioBuffer -> uint32 = "$1.mNumberChannels";
+  fun mData : AudioBuffer -> address = "$1.mData";
+  ctor AudioBuffer : uint32 * uint32 * address = "AudioBuffer {.mDataByteSize=$1, .mNumberChannels=$2, .mData=$3}";
+
+  // Manually define this structure too
+  type _AudioBufferList = "AudioBufferList";
+  typedef AudioBufferList = &_AudioBufferList;
+
+  fun mNumberBuffers: AudioBufferList -> uint32 = "$1->mNumberBuffers";
+  fun mBuffers: AudioBufferList -> +AudioBuffer = "$1->mBuffers";
+
+  // This is a serious mess but its the only way
+  // An AudioBufferList object consist of a count followed by an array of 
+  // pointers to AudioBuffers, so it must be dynamically allocated,
+  // either with malloc or alloca
+  ctor AudioBufferList: uint32 * +AudioBuffer = """
+     ([=](){
+      int n = sizeof(AudioBuffer) + ($1-1)sizeof(void*);
+      return (AudioBufferList*)(::std::malloc(n));
+     }());
+  """;
+  proc deleteAudioBufferList : AudioBufferList = "::std::free($1);";
+  
+  // However in our code we only ever need to construct an AudioBufferList
+  // with a single buffer which does not require a heap allocation
+  // Note the client has to store the result in a variable and take
+  // its address to get a Felix AudioBufferList since that's a pointer
+  fun mk_AudioBufferList1: AudioBuffer -> _AudioBufferList = "AudioBufferList {.mNumberBuffers=1, .mBuffers = {$1}}";
+  
+  // Some core Audio Unit Description parts
+  const kAudioUnitType_Output: OSType;
+  const kAudioUnitSubType_HALOutput: OSType;
+  const kAudioUnitManufacturer_Apple: OSType;
+
+  // Audio Component Descriptor
+  cstruct AudioComponentDescription {
+    componentType: OSType;
+    componentSubType: OSType;
+    componentManufacturer: OSType;
+    componentFlags: uint32;
+    componentFlagsMask: uint32;
+  };
+
+  // Audio Component Locators
+  ctypes AudioComponent;
+  fun AudioComponentFindNext : AudioComponent * &AudioComponentDescription -> AudioComponent;
+  fun AudioComponentFindFirst: &AudioComponentDescription -> AudioComponent =
+    "AudioComponentFindNext(NULL,$1)"
+  ;
+  fun isValid: AudioComponent -> bool = "!($1==NULL)";
+
+  ctypes AudioComponentInstance;
+  typedef AudioUnit = AudioComponentInstance;
+
+  // Property IDs
+  typedef AudioUnitPropertyID = uint32;
+  const kAudioUnitProperty_SetRenderCallback : AudioUnitPropertyID;
+  const kAudioOutputUnitProperty_SetInputCallback : AudioUnitPropertyID;
+  const kAudioOutputUnitProperty_EnableIO : AudioUnitPropertyID;
+  const kAudioUnitProperty_StreamFormat: AudioUnitPropertyID;
+
+  // Scopes
+  typedef AudioUnitScope = uint32;
+  const kAudioUnitScope_Input : AudioUnitScope;
+  const kAudioUnitScope_Output : AudioUnitScope;
+  const kAudioUnitScope_Global : AudioUnitScope;
+
+  // Elements
+  typedef AudioUnitElement = uint32;
+  val GlobalElement = 0;
+
+  gen AudioUnitSetProperty:
+    AudioUnit * 
+    AudioUnitPropertyID *
+    AudioUnitScope * 
+    AudioUnitElement *
+    address * uint32 // property data
+    -> OSStatus
+  ;
+
+  typedef AudioFormatFlags = uint32;
+  const kAudioFormatFlagIsFloat : AudioFormatFlags;
+
+  typedef AudioFormatID = uint32;
+
+  const kAudioFormatLinearPCM : AudioFormatID;
+  const kAudioFormatAC3 : AudioFormatID;
+    //A key that specifies an AC-3 codec. Uses no flags.
+  const kAudioFormat60958AC3 : AudioFormatID;
+    //A key that specifies an AC-3 codec that provides data packaged for transport over an IEC 60958 compliant digital audio interface. Uses the standard format flags in AudioStreamBasicDescription Flags.
+  const kAudioFormatAppleIMA4 : AudioFormatID;
+    //A key that specifies Apple’s implementation of the IMA 4:1 ADPCM codec. Uses no flags.
+  const kAudioFormatMPEG4AAC : AudioFormatID;
+    //A key that specifies an MPEG-4 AAC codec. The flags field contains the MPEG-4 audio object type constant listed in MPEG-4 Audio Object Type Constants indicating the specific kind of data.
+  const kAudioFormatMPEG4CELP : AudioFormatID;
+    //A key that specifies an MPEG-4 CELP codec. The flags field contains the MPEG-4 audio object type constant listed in MPEG-4 Audio Object Type Constants indicating the specific kind of data.
+  const kAudioFormatMPEG4HVXC : AudioFormatID;
+    //A key that specifies an MPEG-4 HVXC codec. The flags field contains the MPEG-4 audio object type constant listed in MPEG-4 Audio Object Type Constants indicating the specific kind of data.
+  const kAudioFormatMPEG4TwinVQ : AudioFormatID;
+    //A key that specifies an MPEG-4 TwinVQ codec. The flags field contains the MPEG-4 audio object type constant listed in MPEG-4 Audio Object Type Constants indicating the specific kind of data.
+  const kAudioFormatMACE3 : AudioFormatID;
+    //MACE 3:1. Uses no flags.
+  const kAudioFormatMACE6 : AudioFormatID;
+    //MACE 6:1. Uses no flags.
+  const kAudioFormatULaw : AudioFormatID;
+    //μLaw 2:1. Uses no flags.
+  const kAudioFormatALaw : AudioFormatID;
+    //aLaw 2:1. Uses no flags.
+  const kAudioFormatQDesign : AudioFormatID;
+    //QDesign music. Uses no flags
+  const kAudioFormatQDesign2 : AudioFormatID;
+    //QDesign2 music. Uses no flags
+  const kAudioFormatQUALCOMM : AudioFormatID;
+    //QUALCOMM PureVoice. Uses no flags
+  const kAudioFormatMPEGLayer1 : AudioFormatID;
+    //MPEG-1/2, Layer 1 audio. Uses no flags
+  const kAudioFormatMPEGLayer2 : AudioFormatID;
+    //MPEG-1/2, Layer 2 audio. Uses no flags
+  const kAudioFormatMPEGLayer3 : AudioFormatID;
+    //MPEG-1/2, Layer 3 audio. Uses no flags
+  const kAudioFormatTimeCode : AudioFormatID;
+    //A stream of IOAudioTimeStamp structures. Uses the IOAudioTimeStamp flags (see Audio Time Stamp Flags and Audio Time Stamp Flag Combination Constant).
+  const kAudioFormatMIDIStream : AudioFormatID;
+    //A stream of MIDIPacketList structures where the time stamps in the MIDIPacket structures are sample offsets in the stream. The mSampleRate field in the AudioStreamBasicDescription structure is used to describe how time is passed in this kind of stream and an audio unit that receives or generates this stream can use this sample rate together with the number of frames it is rendering and the sample offsets within the MIDIPacketList to define the time for any MIDI event within this list. Uses no flags.
+  const kAudioFormatParameterValueStream : AudioFormatID;
+    //A "side-chain" of Float32 data that can be fed or generated by an audio unit and that is used to send a high density of parameter value control information. An audio unit typically runs a parameter value stream at either the sample rate of the audio unit’s audio data, or some integer quotient of this (say a half or a third of the sample rate of the audio). The mSampleRate field in the AudioStreamBasicDescription structure describes this relationship. Uses no flags.
+  const kAudioFormatAppleLossless : AudioFormatID;
+    //Apple Lossless. Uses no flags.
+  const kAudioFormatMPEG4AAC_HE : AudioFormatID;
+    //MPEG-4 High Efficiency AAC audio object. Uses no flags.
+  const kAudioFormatMPEG4AAC_LD : AudioFormatID;
+    //MPEG-4 AAC Low Delay audio object. Uses no flags.
+  const kAudioFormatMPEG4AAC_ELD : AudioFormatID;
+    //MPEG-4 AAC Enhanced Low Delay audio object. Uses no flags.
+  const kAudioFormatMPEG4AAC_ELD_SBR : AudioFormatID;
+    //MPEG-4 AAC Enhanced Low Delay audio object with SBR (spectral band replication) extension layer. Uses no flags.
+  const kAudioFormatMPEG4AAC_HE_V2 : AudioFormatID;
+    //MPEG-4 High Efficiency AAC Version 2 audio object. Uses no flags.
+  const kAudioFormatMPEG4AAC_Spatial : AudioFormatID;
+    //MPEG-4 Spatial Audio audio object. Uses no flags.
+  const kAudioFormatAMR : AudioFormatID;
+    //The AMR (Adaptive Multi-Rate) narrow band speech codec.
+  const kAudioFormatAudible : AudioFormatID;
+    //The codec used for Audible, Inc. audio books. Uses no flags.
+  const kAudioFormatiLBC : AudioFormatID;
+    //The iLBC (internet Low Bitrate Codec) narrow band speech codec. Uses no flags.
+  const kAudioFormatDVIIntelIMA : AudioFormatID;
+    //DVI/Intel IMA ADPCM - ACM code 17.
+  const kAudioFormatMicrosoftGSM : AudioFormatID;
+    //Microsoft GSM 6.10 - ACM code 49.
+  const kAudioFormatAES3 : AudioFormatID;
+    //The format defined by the AES3-2003 standard. Adopted into MXF and MPEG-2 containers and SDTI transport streams with SMPTE specs 302M-2002 and 331M-2000. Uses no flags.
+  const kAudioFormatAMR_WB : AudioFormatID;
+  const kAudioFormatEnhancedAC3 : AudioFormatID;
+  const kAudioFormatMPEG4AAC_ELD_V2 : AudioFormatID;
+  const kAudioFormatFLAC : AudioFormatID;
+  const kAudioFormatMPEGD_USAC : AudioFormatID;
+  const kAudioFormatOpus : AudioFormatID;
+
+  // Audio Stream
+  cstruct AudioStreamBasicDescription
+  {
+      double mSampleRate;
+      AudioFormatID mFormatID;
+      AudioFormatFlags mFormatFlags;
+      uint32 mBytesPerPacket;
+      uint32 mFramesPerPacket;
+      uint32 mBytesPerFrame;
+      uint32 mChannelsPerFrame;
+      uint32 mBitsPerChannel;
+      uint32 mReserved;
+  };
+
+  gen AudioUnitInitialize: AudioUnit -> OSStatus;
+  gen AudioOutputUnitStart: AudioUnit -> OSStatus;
+  gen AudioOutputUnitStop: AudioUnit -> OSStatus;
+  gen AudioUnitUninitialize: AudioUnit -> OSStatus;
+  gen AudioComponentInstanceDispose: AudioUnit -> OSStatus;
+  gen AudioComponentInstanceNew : AudioComponent * &AudioUnit -> OSStatus;
+  gen AudioUnitRender: 
+    AudioUnit * &AudioUnitRenderActionFlags * &<AudioTimeStamp * uint32 * uint32 *  AudioBufferList
+    ->
+    OSStatus
+  ;
+
+  // Define thunk for Felix
+  callback fun audioRenderCallback_thunk :
+    audioRenderCallback_thunk *               // void*
+    &AudioUnitRenderActionFlags *
+    &<AudioTimeStamp *
+    uint32 *
+    uint32 *
+    AudioBufferList
+    -> OSStatus
+  ;
+
+  // C type of Apple Audio Callback
+  typedef AURenderCallback = audioRenderCallback_thunk'c_callback_type
+/*
+    address *               // void*
+    &AudioUnitRenderActionFlags *
+    &<AudioTimeStamp *
+    uint32 *
+    uint32 *
+    AudioBufferList
+    --> OSStatus
+*/
+  ;
+
+  // The type of the thunk doesn't quite agree with Apple
+  typedef audioRenderCallback_thunk_t = audioRenderCallback_thunk'felix_thunk_type
+/*
+    (
+      &AudioUnitRenderActionFlags *
+      &<AudioTimeStamp *
+      uint32 *
+      uint32 *
+      AudioBufferList
+      -> OSStatus
+    ) *
+    &AudioUnitRenderActionFlags *
+    &<AudioTimeStamp *
+    uint32 *
+    uint32 *
+    AudioBufferList
+    --> OSStatus
+*/
+  ;
+
+  // Force the Felix thunk to have the type Apple wants
+  fun castCB_thunk : audioRenderCallback_thunk_t -> AURenderCallback = 
+    "reinterpret_cast<AURenderCallback>($1)"
+  ;
+
+  // Apple Callback specification object type
+  cstruct AURenderCallbackStruct {
+    inputProc: AURenderCallback;
+    inputProcRefCon: address;
+  };
+
+
+} // class
+@
+
+@tangle AppKit.flx
+include "std/apple/Foundation";
+
+open class AppKit
+{
+  requires package "appkit";
+  type NSSound = "NSSound*";
+  type NSColor = "NSColor*";
+
+  fun loadSound(filename:NSString)=>
+    cexpr[NSSound] """
+       [
+         [NSSound alloc] initWithContentsOfFile:$1 
+         byReference:NO
+       ]
+    """ filename endcexpr
+  ;
+  proc play: NSSound = "[$1 play];";
+}
+@
+
+@tangle Cocoa.flx
+include "std/apple/Foundation";
+open class Cocoa {
+  requires package "cocoa";
+  type NSWindow = "NSWindow*";
+  fun getProcessName: 1 -> NSString = "[[NSProcessInfo processInfo] processName]";
+
+  gen createTitledWindow : NSString * int * int * int * int -> NSWindow = """
+    ([&](){
+        NSWindow *x = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, $4, $5)
+           styleMask:NSTitledWindowMask backing:NSBackingStoreBuffered defer:NO];
+        [x cascadeTopLeftFromPoint:NSMakePoint($2,$3)];
+        [x setTitle: $1];
+        [x makeKeyAndOrderFront:nil];
+        return x;
+        }())
+  """; // Note use of C++ lambda
+
+  // Starts main event loop
+  // do NOT confuse with Felix run procedure which creates a scheduler to run fibres
+  proc run : 1 = "[NSApp run];"; 
+}
+@
+
+@tangle foundation.fpc
+Name: Foundation
+Description: Foundation
+Requires: objc
+includes: '<Foundation/Foundation.h>'
+provides_dlib: ---framework=Foundation
+provides_slib: ---framework=Foundation
+@
+
+@tangle appkit.fpc
+Name: AppKit 
+Description: AppKit
+Requires: foundation 
+includes: '<AppKit/AppKit.h>'
+provides_dlib: ---framework=AppKit
+provides_slib: ---framework=AppKit
+@
+
+@tangle cocoa.fpc
+Name: Cocoa
+Description: Cocoa
+Requires: foundation
+includes: '<Cocoa/Cocoa.h>'
+provides_dlib: ---framework=Cocoa
+provides_slib: ---framework=Cocoa
+@
+
+
+@tangle corefoundation.fpc
+Name: CoreFoundation
+Description: CoreFoundation
+provides_dlib: ---framework=CoreFoundation
+provides_slib: ---framework=CoreFoundation
+@
+
+@tangle audiounit.fpc
+Name: AudioUnit
+Description: AudioUnit C API
+includes: '<AudioUnit/AudioUnit.h>'
+provides_dlib: ---framework=AudioUnit
+provides_slib: ---framework=AudioUnit
+@
+
+@tangle coreaudio.fpc
+Name: CoreAudio
+Description: CoreAudio C API
+includes: '<CoreAudio/CoreAudio.h>'
+provides_dlib: ---framework=CoreAudio
+provides_slib: ---framework=CoreAudio
+@
+
+
+@tangle audiotoolbox.fpc
+Name: AudioToolbox
+Description: AudioToolbox
+provides_dlibs: ---framework=AudioToolbox
+provides_slibs: ---framework=AudioToolbox
+@
+
+@tangle objc.fpc
+Name: ObjC Runtime
+Description: run time library for objective C
+cflags: -ObjC++
+provides_dlib: -L/usr/lib -lobjc
+provides_slib: -L/usr/lib -lobjc
+includes: '"/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/objc/runtime.h"'
+
+
+ 

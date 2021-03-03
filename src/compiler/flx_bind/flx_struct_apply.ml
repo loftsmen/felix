@@ -2,7 +2,7 @@ open Flx_btype
 open Flx_bexpr
 open Flx_btype_subst
 
-let cal_struct_apply 
+let cal_struct_apply_to_record 
   bsym_table state bind_type' mkenv build_env cal_apply
   rs sr f (ea, ta as a) i ts' 
 =
@@ -11,11 +11,21 @@ let cal_struct_apply
     | { Flx_sym.id=id; vs=vs; symdef=Flx_types.SYMDEF_cstruct (ls,_) } -> id,vs,ls
     | _ -> assert false
   in
+  let cmp (s1,t1) (s2, t2) = compare s1 s2 in
+  let sfls = List.stable_sort cmp fls in
+(*
+print_endline ("Stuct apply, name = " ^ id);
+print_endline ("Struct fields = " ^ Flx_util.catmap "," fst sfls);
+*)
   let _,vs,_  = Flx_generic.find_split_vs state.Flx_lookup_state.sym_table bsym_table i in
   let alst = match ta with
     |BTYP_record (ts) -> ts
     | _ -> assert false
   in
+  let salst = List.stable_sort cmp alst in
+(*
+print_endline ("Record fields = " ^ Flx_util.catmap "," fst salst);
+*)
   let nf = List.length fls in
   let na = List.length alst in
   if nf <> na then Flx_exceptions.clierrx "[flx_bind/flx_struct_apply.ml:20: E252] " sr
@@ -38,11 +48,11 @@ let cal_struct_apply
       in
     let ct = bind_type' state bsym_table env' Flx_lookup_state.rsground sr ct bvs mkenv in
     let ct = tsubst sr vs' ts' ct in
-      if Flx_unify.type_eq bsym_table state.Flx_lookup_state.counter ct t then begin
-        bexpr_get_n t j a
+      if Flx_unify.ge bsym_table state.Flx_lookup_state.counter ct t then begin
+        bexpr_coerce (bexpr_get_n t j a,ct)
       end else Flx_exceptions.clierrx "[flx_bind/flx_struct_apply.ml:42: E254] " sr ("Component " ^ name ^
         " struct component type " ^ Flx_print.sbt bsym_table ct ^
-        "\ndoesn't match record type " ^ Flx_print.sbt bsym_table t
+        "\ndoesn't match record component type " ^ Flx_print.sbt bsym_table t
       )
     )
     fls

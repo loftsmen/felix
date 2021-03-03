@@ -145,7 +145,11 @@ print_endline ("Closure wrapper generator: Check expr " ^ sbe bsym_table e);
   match e with
   | BEXPR_apply ((BEXPR_closure (i,ts),ft),e),rt ->
     begin
-      let bsym = Flx_bsym_table.find bsym_table i in
+      let bsym = 
+        try Flx_bsym_table.find bsym_table i 
+        with Not_found ->
+          failwith ("[Flx_mkcls: chk_expr] Cannot find symbol " ^ string_of_int i ^ " in bound symbol table")
+      in
       match Flx_bsym.bbdcl bsym with
       | BBDCL_external_fun _ -> bexpr_apply_prim rt (i,ts,ce e)
       | BBDCL_struct _  -> bexpr_apply_struct rt (i,ts,ce e)
@@ -318,11 +322,13 @@ print_endline ("Struct wrapper: struct type = " ^ sbt bsym_table ret);
     ;
     let dom2,cod2= 
       match f2 with 
+      | _,BTYP_linearfunction (d,c) -> d,c
       | _,BTYP_function (d,c) -> d,c
       | _ -> assert false 
     in
     let dom1,cod1 = 
       match f1 with
+      | _,BTYP_linearfunction (d,c) -> d,c
       | _,BTYP_function (d,c) -> d,c
       | _ -> assert false
     in
@@ -337,7 +343,11 @@ print_endline ("Struct wrapper: struct type = " ^ sbt bsym_table ret);
        [ bexe_fun_return (sr, e) ]
     in
 
-    let bbdcl = bbdcl_fun ([],[],(Satom param,None),cod1,noeffects,exes) in
+    let properties = match f1,f2 with 
+      | (_,BTYP_linearfunction _),(_,BTYP_linearfunction _) -> [`LinearFunction]
+      | _ -> []
+    in
+    let bbdcl = bbdcl_fun (properties,[],(Satom param,None),cod1,noeffects,exes) in
     Flx_bsym_table.update_bbdcl nutab closure_bid bbdcl;
     bexpr_closure t (closure_bid, [])
 

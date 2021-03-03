@@ -24,7 +24,6 @@
 @tangler namespaces.fsyn                 = share/lib/grammar/namespaces.fsyn
 @tangler patterns.fsyn                   = share/lib/grammar/patterns.fsyn
 @tangler plugins.fsyn                    = share/lib/grammar/plugins.fsyn
-@tangler python_grammar.fsyn             = share/lib/grammar/python_grammar.fsyn
 @tangler requirements.fsyn               = share/lib/grammar/requirements.fsyn
 @tangler save.fsyn                       = share/lib/grammar/save.fsyn
 @tangler statements.fsyn                 = share/lib/grammar/statements.fsyn
@@ -45,22 +44,24 @@
 @tangler bitexpr.fsyn      = share/lib/std/algebra/bitexpr.fsyn
 
 
-@tangler swapop.fsyn  = share/lib/grammar/swapop.fsyn
+@tangler swapop.fsyn        = share/lib/grammar/swapop.fsyn
 
-@tangler int.fsyn        =share/lib/grammar/grammar_int_lexer.fsyn
-@tangler float.fsyn      =share/lib/grammar/grammar_float_lexer.fsyn
+@tangler int.fsyn           = share/lib/grammar/grammar_int_lexer.fsyn
+@tangler float.fsyn         = share/lib/grammar/grammar_float_lexer.fsyn
 @tangler tupleexpr.fsyn     = share/lib/std/datatype/tupleexpr.fsyn
 @tangler debug.fsyn         = share/lib/grammar/debug.fsyn
-@tangler exceptions.fsyn            = share/lib/std/control/exceptions.fsyn
-@tangler spipeexpr.fsyn = share/lib/std/control/spipeexpr.fsyn
-@tangler listexpr.fsyn = share/lib/std/datatype/listexpr.fsyn
+@tangler exceptions.fsyn    = share/lib/std/control/exceptions.fsyn
+@tangler spipeexpr.fsyn     = share/lib/std/control/spipeexpr.fsyn
+@tangler listexpr.fsyn      = share/lib/std/datatype/listexpr.fsyn
 
-@tangler boolexpr.fsyn        = share/lib/std/scalar/boolexpr.fsyn
-@tangler parser_syn.fsyn = share/lib/std/strings/parser_syn.fsyn
-@tangler pfor.fsyn              = share/lib/grammar/pfor.fsyn
+@tangler boolexpr.fsyn      = share/lib/std/scalar/boolexpr.fsyn
+@tangler parser_syn.fsyn    = share/lib/std/strings/parser_syn.fsyn
+@tangler pfor.fsyn          = share/lib/grammar/pfor.fsyn
 
-@tangler regexps.fsyn        = share/lib/std/regex/regexps.fsyn
-@tangler stringexpr.fsyn     = share/lib/std/strings/stringexpr.fsyn
+@tangler regexps.fsyn       = share/lib/std/regex/regexps.fsyn
+@tangler stringexpr.fsyn    = share/lib/std/strings/stringexpr.fsyn
+
+@tangler objc.fsyn          = share/lib/std/objc/objc.fsyn
 
 @h1 Type Grammar
 @tangle types.fsyn
@@ -82,12 +83,20 @@ syntax types {
 
   t[stuple_pri] := stypeexpr ("," stypeexpr )+ =># "(chain 'typ_type_tuple _1 _2)";
 
+  // these for type operations on static_bool, they're NOT type combinators
   t[simplies_condition_pri] := t[simplies_condition_pri] "implies" t[>simplies_condition_pri] =># "`(typ_implies ,_sr ,_1 ,_3)";
   t[sor_condition_pri] := t[sor_condition_pri] "or" t[>sor_condition_pri] =># "`(typ_or ,_sr ,_1 ,_3)";
   t[sand_condition_pri] := t[sand_condition_pri]  "and" t[>sand_condition_pri] =># "`(typ_and ,_sr ,_1 ,_3)";
   t[snot_condition_pri] := "not" t[snot_condition_pri]  =># "`(typ_not ,_sr ,_2)";
   t[satomic_pri] := "true"  =># "`(typ_true,_sr)";
   t[satomic_pri] := "false"  =># "`(typ_false ,_sr)";
+
+  // this is the intersection combinator
+  t[sproduct_pri] := t[sproduct_pri]  "&" t[>sproduct_pri] =># '`(typ_intersect ,_sr ,_1 ,_3)';
+
+  //$ Ellipsis (for binding C varags functions).
+  t[satomic_pri] := "..." =># "`(typ_ellipsis ,_sr)";
+
 
   t[ssum_pri] := t[ssum_pri] "`+" t[>ssum_pri] =># "(tInfix)";
   t[ssum_pri] := t[ssum_pri] "`-" t[>ssum_pri] =># "(tInfix)";
@@ -109,23 +118,31 @@ syntax types {
   t[sarrow_pri] := t[>sarrow_pri] "->" t[sarrow_pri] =># "`(typ_arrow (,_1 ,_3))";
   t[sarrow_pri] := t[>sarrow_pri] "->" "[" stype "]" t[sarrow_pri] =># "`(typ_effector (,_1 ,_4 ,_6))";
 
+  t[sarrow_pri] := t[>sarrow_pri] "->." t[sarrow_pri] =># "`(typ_lineararrow (,_1 ,_3))";
+  t[sarrow_pri] := t[>sarrow_pri] "->." "[" stype "]" t[sarrow_pri] =># "`(typ_lineareffector (,_1 ,_4 ,_6))";
+
+
   //$ C function type, right associative.
   t[sarrow_pri] := t[>sarrow_pri] "-->" t[sarrow_pri] =># "`(typ_longarrow (,_1 ,_3))";
 
   //$ Addition: left non-associative.
   t[ssum_pri] := t[>ssum_pri] ("+" t[>ssum_pri])+ =># "(chain 'typ_sum _1 _2)" note "add";
+  t[scompactsum_pri] := t[>scompactsum_pri] ("\+" t[>scompactsum_pri])+ =># "(chain 'typ_compactsum _1 _2)" note "add";
 
   //$ multiplication: non-associative.
   t[sproduct_pri] := t[>sproduct_pri] ("*" t[>sproduct_pri])+ =># "(chain 'typ_tuple _1 _2)" note "mul";
+  t[scompactproduct_pri] := t[>scompactproduct_pri] ("\*" t[>scompactproduct_pri])+ =># "(chain 'typ_compacttuple _1 _2)" note "mul";
   
+  // questionable precedences here!
   t[sproduct_pri] := t[>sproduct_pri] "*+" t[sproduct_pri] =># "`(typ_rptsum ,_sr ,_1 ,_3)";
+  t[sproduct_pri] := t[>sproduct_pri] "\*+" t[sproduct_pri] =># "`(typ_compactrptsum ,_sr ,_1 ,_3)";
 
   //$ Prefix 
   t[sprefixed_pri] := "~" t[sprefixed_pri] =># "`(typ_dual ,_sr ,_2)";
 
   t[sprefixed_pri] := "!" t[sprefixed_pri] =># "(tPrefix)";
-  t[sprefixed_pri] := "+" t[sprefixed_pri] =># "(tprefix 'prefix_plus)";
-  t[sprefixed_pri] := "-" t[sprefixed_pri] =># "(tprefix 'neg)";
+  t[sprefixed_pri] := "+" t[sprefixed_pri] =># "(tprefix 'tprefix_plus)";
+  t[sprefixed_pri] := "-" t[sprefixed_pri] =># "(tprefix 'tneg)";
 
 
   //$ Fortran power.
@@ -133,7 +150,8 @@ syntax types {
   t[spower_pri] := t[ssuperscript_pri] "<**>" t[sprefixed_pri] =># "(typ_tuple_snoc ,_sr ,_1 ,_3)";
 
   //$ Superscript, exponential.
-  t[ssuperscript_pri] := t[ssuperscript_pri] "^" t[srefr_pri] =># "`(typ_superscript ,_1 ,_3)";
+  t[ssuperscript_pri] := t[ssuperscript_pri] "^" t[srefr_pri] =># "`(typ_array ,_1 ,_3)";
+  t[ssuperscript_pri] := t[ssuperscript_pri] "\^" t[srefr_pri] =># "`(typ_compactarray ,_1 ,_3)";
 
   t[sapplication_pri] := t[sapplication_pri] t[>sapplication_pri] =># 
     "`(typ_apply ,_sr (,_1 ,_2))" note "apply";
@@ -236,6 +254,7 @@ syntax expressions {
     // TUPLES
     stuple_cons_pri <
     stuple_pri <
+    scompacttuple_pri <
 
     // LOGIC
     simplies_condition_pri <
@@ -267,8 +286,10 @@ syntax expressions {
 
     // NUMERIC OPERATORS
     ssum_pri <
+    scompactsum_pri <
     ssubtraction_pri <
     sproduct_pri <
+    scompactproduct_pri <
     s_term_pri <        // division 
 
     // STUFF
@@ -344,7 +365,6 @@ syntax expressions {
     """;
 
 
-
   //$ Unterminated match
   x[let_pri] := "let" pattern_match =># "_2"; 
   // below gets confused with statement expression .. :-)
@@ -376,14 +396,6 @@ syntax expressions {
   //$ Named variable.
   x[sas_expr_pri] := x[sas_expr_pri] "as" "var" sname =># "`(ast_as_var ,_sr (,_1 ,_4))";
 
-
-//  x[sarrow_pri] := x[>sarrow_pri] ".." x[>sarrow_pri] =># '''
-//    `(ast_apply ,_sr ((ast_apply ,_sr (,(nos "slice_range") ,_1)) ,_3))
-//  ''';
-//
-//  x[sarrow_pri] := x[>sarrow_pri] "..<" x[>sarrow_pri] =># '''
-//    `(ast_apply ,_sr ((ast_apply ,_sr (,(nos "slice_range_excl") ,_1)) ,_3))
-//  ''';
 
   x[sarrow_pri] := x[>sarrow_pri] ".." x[>sarrow_pri] =># "(infix 'Slice_range_incl)";
   x[sarrow_pri] := x[>sarrow_pri] "..<" x[>sarrow_pri] =># "(infix 'Slice_range_excl)";
@@ -581,6 +593,10 @@ syntax expressions {
     "`(ast_remove_fields ,_sr ,_2 ,_4)"
   ;
 
+  satom := "(" sexpr "getall" sname ")" =>#
+    "`(ast_getall_field ,_sr ,_2 ,_4)"
+  ;
+
   satom := "(" sexpr "with" rassign ("," rassign2 )* ")" =>#
     "`(ast_replace_fields ,_sr ,_2 ,(cons _4 (map second _5)))"
   ;
@@ -599,9 +615,6 @@ syntax expressions {
 
   //$ Wildcard pattern.
   satom := _ =># "`(ast_patany ,_sr)";
-
-  //$ Ellipsis (for binding C varags functions).
-  satom := "..." =># "`(ast_ellipsis ,_sr)";
 
   //$ Callback expression.
   satom := "callback" "[" sexpr "]" =># "`(ast_callback ,_sr ,_3)";
@@ -678,6 +691,11 @@ syntax expressions {
   satom := "{" setform  "}" =># "_2";
   satom := "\{" setform  "\}" =># "_2";
 
+  satom := "@(" sexpr ")" =># 
+    """
+      `(ast_apply ,_sr (,(nos "objc_box") ,_2))
+    """
+  ; 
 
 
 }
@@ -997,6 +1015,12 @@ syntax cbind {
   private cbind_stmt := "export" "type" "(" stypeexpr ")" "as" sstring ";" =>#
     "`(ast_export_type ,_sr ,_4 ,_7)";
 
+
+  // Export python3 function
+  private cbind_stmt := "export" "python" "fun" ssuffixed_name "as" sstring ";" =>#
+    "`(ast_export_python_fun ,_sr ,_4 ,_6)";
+
+
   //$ The optional precedence phase specifies
   //$ the C++ precedence of an expression, to allow
   //$ the Felix compiler to minimise generated parentheses.
@@ -1165,7 +1189,7 @@ syntax cbind {
   //$
   //$ private type RE2_ = "::re2::RE2";
   //$ _gc_pointer _gc_type RE2_ type RE2 = "::re2::RE2*";
-  //$ gen _ctor_RE2 : string -> RE2 = "new (*PTF gcp, @0, false) RE2($1)";
+  //$ gen _ctor_RE2 : string -> RE2 = "new (*ptf->gcp, @0, false) RE2($1)";
   //$
   //$ We bind the private type RE2_ to the C type RE2.
   //$ It's private so the public cannot allocate it.
@@ -1204,13 +1228,13 @@ syntax cbind {
   //$ This required giving the Felix type of the expression. 
   //$ The expression is contained in the string. For example:
   //$
-  //$ code [double] "sin(0.7)"
+  //$ cexpr [double] "sin(0.7)" endcexpr
   //$
   satom := "cexpr" "[" stypeexpr "]" scode_spec sexpr? "endcexpr" =># "`(ast_expr ,_sr ,_5 ,_3 ,_6)";
 
   //$ A short form embedding for variables.
   //$
-  //$ code [double] M_PI
+  //$ cvar [double] M_PI
   //$
   satom := "cvar" "[" stypeexpr "]" sname =># "`(ast_expr ,_sr (Str ,_5) ,_3 ())";
 
@@ -1892,14 +1916,10 @@ syntax control
       (
         (labstring (fresh_name "_callcclab_"))
         (lab (nos labstring))
-        (sa (splitapply _2))
-        (fun (first sa))
-        (arg (second sa))
-        (apl `(ast_apply ,_sr (,fun ,lab)))
       )
       `(ast_seq ,_sr 
         (
-          (ast_jump ,_sr ,apl ,arg)
+          (ast_jump ,_sr ,_2 ,lab)
           (ast_label ,_sr ,labstring)
         )
       )
@@ -1980,16 +2000,6 @@ syntax executable {
 @
 
 
-@h2 Stub extension file inclusion support
-This file is included in the main include file
-list, and is extended during the build process
-by the python script @{src/tools/flx_find_grammar_files.py}.
-
-@tangle extra.files
-grammar/python_grammar.fsyn
-grammar/debug.fsyn
-@
-
 @h2 Master DSSL dependency list.
 Defines the standard felix grammar by specifying
 all the DSSLs required for it.
@@ -2045,6 +2055,13 @@ syntax functions {
     """
     `(ast_lambda ,_sr (,_3 ,_4 ,(first (first _5)) ((ast_fun_return ,_sr ,_7))))
     """;
+
+  //$ Anonymous function (lamda). Linear
+  x[slambda_pri] := sadjectives "fun" stvarlist slambda_fun_args fun_return_type "=>." sexpr =>#
+    """
+    `(ast_linearlambda ,_sr (,_3 ,_4 ,(first (first _5)) ((ast_fun_return ,_sr ,_7))))
+    """;
+
 
   //$ Anonymous generator (lamda).
   satom := sadjectives "gen" stvarlist slambda_fun_args fun_return_type "="? scompound =>#
@@ -2219,6 +2236,15 @@ syntax functions {
       `(ast_curry_effects ,_sr ,(first _3) ,(second _3) ,_4 ,(first _5) ,(second _5) ,(cal_funkind _1 _2) ,_1 ,body))
       )
     """;
+
+  sfunction := sadjectives sfun_kind sdeclname sfun_arg* fun_return_type "=>." sexpr ";" =>#
+    """
+      (begin ;;(display "LINEAR FUNCTION")
+      (let ((body `((ast_fun_return ,_sr ,_7))))
+      `(ast_curry_effects ,_sr ,(first _3) ,(second _3) ,_4 ,(first _5) ,(second _5) ,(cal_funkind _1 _2) ,(cons 'LinearFunction _1) ,body))
+      )
+    """;
+
 
   //$ General function definition. Multiple tuple arguments, body of statements.
   //$ inline fun f (x:int when x>0) (y:long when y>0l) : long expect result > 0l { return x.long + y; }
@@ -2485,33 +2511,56 @@ For files generated by this package. Includes @{grammar/extra.files}
 for extensions in other packages.
 @tangle grammar.files
 grammar/utility.fsyn
-grammar/blocks.fsyn
 grammar/grammar_scheme_support.fsyn
-grammar/grammar_regdefs.fsyn
-grammar/grammar_ident_lexer.fsyn
-grammar/grammar_string_lexer.fsyn
-grammar/grammar_lexer.fsyn
-grammar/expressions.fsyn
-grammar/brackets.fsyn
-grammar/texsyms.fsyn
+grammar/blocks.fsyn
+grammar/variables.fsyn
 grammar/patterns.fsyn
 grammar/functions.fsyn
-grammar/statements.fsyn
-grammar/variables.fsyn
-grammar/macros.fsyn
-grammar/cbind.fsyn
-grammar/executable.fsyn
-grammar/assignment.fsyn
+grammar/cgram.fsyn
 grammar/control.fsyn
-grammar/conditional.fsyn
+grammar/statements.fsyn
+grammar/plugins.fsyn
+grammar/assertions.fsyn
+grammar/cbind.fsyn
+grammar/grammar_float_lexer.fsyn
+grammar/namespaces.fsyn
+grammar/swapop.fsyn
+grammar/macros.fsyn
+grammar/grammar_string_lexer.fsyn
+grammar/brackets.fsyn
+grammar/texsyms.fsyn
+grammar/grammar_regdefs.fsyn
+grammar/debug.fsyn
+grammar/types.fsyn
+grammar/assignment.fsyn
+grammar/executable.fsyn
+grammar/chips.fsyn
 grammar/loops.fsyn
 grammar/requirements.fsyn
+grammar/grammar_int_lexer.fsyn
+grammar/conditional.fsyn
+grammar/grammar_ident_lexer.fsyn
+grammar/pfor.fsyn
+grammar/grammar_lexer.fsyn
+grammar/expressions.fsyn
 grammar/type_decls.fsyn
-grammar/assertions.fsyn
-grammar/namespaces.fsyn
-grammar/cgram.fsyn
-grammar/plugins.fsyn
-@@grammar/extra.files
+std/strings/parser_syn.fsyn
+std/strings/stringexpr.fsyn
+std/datatype/tupleexpr.fsyn
+std/datatype/listexpr.fsyn
+std/regex/regexps.fsyn
+std/objc/objc.fsyn
+std/scalar/boolexpr.fsyn
+std/control/exceptions.fsyn
+std/control/spipeexpr.fsyn
+std/algebra/tordcmpexpr.fsyn
+std/algebra/mulexpr.fsyn
+std/algebra/pordcmpexpr.fsyn
+std/algebra/cmpexpr.fsyn
+std/algebra/bitexpr.fsyn
+std/algebra/addexpr.fsyn
+std/algebra/setexpr.fsyn
+std/algebra/divexpr.fsyn
 grammar/felix.fsyn
 grammar/save.fsyn
 @
@@ -3012,6 +3061,7 @@ SCHEME """
         (n (string-length s))
         (result 
           (cond
+            ((prefix? "@'''" s)(unescape (substring s 4 (- n 3))))
             ((prefix? "w'''" s)(unescape (substring s 4 (- n 3))))
             ((prefix? "W'''" s)(unescape (substring s 4 (- n 3))))
             ((prefix? "c'''" s)(unescape (substring s 4 (- n 3))))
@@ -3028,6 +3078,7 @@ SCHEME """
             ((prefix? "R'''" s)(substring s 4 (- n 3)))
             ((prefix? "'''" s)(unescape (substring s 3 (- n 3))))
 
+            ((prefix? "@\"\"\"" s)(unescape (substring s 4 (- n 3))))
             ((prefix? "w\"\"\"" s)(unescape (substring s 4 (- n 3))))
             ((prefix? "W\"\"\"" s)(unescape (substring s 4 (- n 3))))
             ((prefix? "c\"\"\"" s)(unescape (substring s 4 (- n 3))))
@@ -3044,6 +3095,7 @@ SCHEME """
             ((prefix? "R\"\"\"" s)(substring s 4 (- n 3)))
             ((prefix? "\"\"\"" s)(unescape (substring s 3 (- n 3))))
 
+            ((prefix? "@'" s)(unescape (substring s 2 (- n 1))))
             ((prefix? "w'" s)(unescape (substring s 2 (- n 1))))
             ((prefix? "W'" s)(unescape (substring s 2 (- n 1))))
             ((prefix? "c'" s)(unescape (substring s 2 (- n 1))))
@@ -3060,6 +3112,7 @@ SCHEME """
             ((prefix? "R'" s)(substring s 2 (- n 1)))
             ((prefix? "'" s)(unescape (substring s 1 (- n 1))))
 
+            ((prefix? "@\"" s)(unescape (substring s 2 (- n 1))))
             ((prefix? "w\"" s)(unescape (substring s 2 (- n 1))))
             ((prefix? "W\"" s)(unescape (substring s 2 (- n 1))))
             ((prefix? "c\"" s)(unescape (substring s 2 (- n 1))))
@@ -3227,6 +3280,7 @@ syntax felix_string_lexer {
 
   regdef string_literal = plain_string_literal | qstring | raw_string_literal;
 
+  regdef NSString_literal = '@' plain_string_literal; 
   regdef wstring_literal = ('w' | 'W') plain_string_literal; 
   regdef ustring_literal = ('u' | 'U') plain_string_literal; 
   regdef cstring_literal = ('c' | 'C') plain_string_literal; 
@@ -3264,6 +3318,21 @@ syntax felix_string_lexer {
     )
   """;
   sliteral := String =># "_1";
+
+  // String like literals.
+  regdef NSString = NSString_literal;
+  literal NSString =># """
+    (let*
+      (
+        (ftype "NSString")
+        (iv (decode-string _1))
+        (cv (c-quote-string iv))
+        (cv (string-append "@" cv))
+      )
+      `(ast_literal ,_sr ,ftype ,iv ,cv)
+    )
+  """;
+  sliteral := NSString =># "_1";
 
   regdef Wstring = wstring_literal;
   literal Wstring =># """
@@ -4318,15 +4387,6 @@ syntax plugins
 }
 @
 
-@h2 Python export grammar.
-Used to create Python3 modules in emitted libraries.
-@tangle python_grammar.fsyn
-syntax python_grammar {
-  stmt := "export" "python" "fun" ssuffixed_name "as" sstring ";" =>#
-    "`(ast_export_python_fun ,_sr ,_4 ,_6)";
-}
-@
-
 @h2 Requirements
 Used to define dependencies on external resources.
 @tangle requirements.fsyn
@@ -4507,7 +4567,7 @@ syntax requirements {
   //$ This is a special code to make specific
   //$ that a binding is an identity which can
   //$ be optimised away.
-  scode_spec := "ident" =># "'Identity";
+  //scode_spec := "ident" =># "'Identity";
 
   //$ The anonymous requires statement specifies requirements which 
   //$ propagates to all C bindings
@@ -5195,7 +5255,7 @@ syntax type_decls {
     )
     """;
 
-  stypecasematch := "typecase" sexpr "with" stypecase_matching+ "endmatch" =>#
+  stypecasematch := "typecase" stype "with" stypecase_matching+ "endmatch" =>#
     "`(ast_typecase_match ,_sr (,_2 ,_4))";
   stypecase_matching := "|" stype "=>" sexpr =># "`(,_2 ,_4)";
 
@@ -5977,6 +6037,11 @@ syntax felix_int_lexer {
   )
   """; 
   sliteral := int_lit =># "`(ast_literal ,_sr ,@_1)";
+  sliteral := "@" int_lit =># 
+    """
+      `(ast_literal ,_sr "NSNumber" ,(second _2) ,(string-append "@" (third _2)))
+    """
+  ;
 
   // Typed signed integer constant.
   sintegral := int_lit =># "_1";
@@ -6052,6 +6117,12 @@ syntax felix_float_lexer {
   // Floating literal.
   sliteral := sfloat =># "`(ast_literal ,_sr ,@_1)";
 
+  sliteral := "@" sfloat =># 
+    """
+      `(ast_literal ,_sr "NSNumber" ,(second _2) ,(string-append "@" (third _2)))
+    """
+  ;
+
 }
 
 
@@ -6069,6 +6140,7 @@ syntax tupleexpr
 
   //$ Tuple formation non-associative.
   x[stuple_pri] := x[>stuple_pri] ( "," x[>stuple_pri])+ =># "(chain 'ast_tuple _1 _2)";
+  x[scompacttuple_pri] := x[>scompacttuple_pri] ( "\," x[>scompacttuple_pri])+ =># "(chain 'ast_compacttuple _1 _2)";
 
 }
 
@@ -6143,9 +6215,19 @@ syntax listexpr
     '(binop (nos "Snoc") _3 _1)'
   ;
 
+  satom := "@selector(" flx_ident ")" =># 
+    '''
+      `(ast_apply ,_sr (,(nos "selector") ,(stringof _2)))
+    ''';
+
   satom := "(" "[" expr_comma_list "]" ")" =># 
     '''`(ast_apply ,_sr (,(nos "list") (ast_tuple ,_sr ,_3)))'''
   ; 
+
+  satom := "@[" expr_comma_list  "]" =># 
+    '''`(ast_apply ,_sr (,(nos "NSArray") (ast_tuple ,_sr ,_2)))'''
+  ; 
+
 }
 
 
@@ -6434,4 +6516,144 @@ syntax stringexpr
   x[sfactor_pri] := x[sfactor_pri] "." "[" "to" sexpr "]" =># 
    "(binop (noi 'copyto) _1 _5)";
 }
+
+@h1 ObjC Syntax
+@tangle objc.fsyn
+syntax ObjC
+{
+
+  stmt 
+      := "objc-bind" class_interface srequires_clause ";" =># '`(objc_bind_class_interface ,_sr ,_2 ,_3)' 
+      | "objc-bind" protocol_interface srequires_clause ";" =># '`(objc_bind_protocol_interface ,_sr ,_2 ,_3)' 
+      ;
+ 
+  class_interface 
+      := "@interface" sname (":" sname)? protocol_reference_list? instance_variables? interface_declaration* "@end"
+         =># '`(objc_class_interface ,_2 ,_3 ,_4 ,_5 ,_6)'
+      ;
+/*
+  class_implementation
+      := "@implementation" sname ":" ? instance_variables? implementation_definition* "@end"
+      ;
+
+  category_interface
+      := "@interface" class_name "(" category_name? ")" protocol_reference_list? interface_declaration* "@end"
+      ;
+
+  category_implementation
+      := "@implementation" sname "("  sname ")" implementation_definition* "@end"
+      ;
+*/
+
+  protocol_interface
+      := "@protocol" sname protocol_reference_list? interface_declaration* "@end"
+         =># '`(objc_protocol_interface ,_2 ,_3 ,_4)'
+      ;
+
+  class_declaration_list
+      := "@class" snames =># '_2'
+      ;
+
+  protocol_reference_list
+      := "<" snames ">" =># '_2'
+      ;
+
+  instance_variables
+      := "{" instance_variable_declaration* "}" =># '_2'
+      ;
+
+  instance_variable_declaration
+      := stypeexpr sname ";" =># "`(Pval ,_2 ,_1)" // like C: int x;!
+      | sname ":" stypeexpr ";" =># "`(Pval ,_1 ,_3)"
+      ;
+
+
+/*
+  instance_variable_declaration
+      := visibility_specification =># '`((objc_visibility_specification ,_1))'
+      | struct_declaration =># '`((objc_struct_declaration ,_1))'
+      | instance_variable_declaration visibility_specification =># '(append _1 (list _2))'
+      | instance_variable_declaration struct_declaration =># '(append _1 (list _2))'
+      ;
+
+  visibility_specification
+      := "@private" =># '_1' 
+      | "@protected" =># '_1' 
+      | "@package" =># '_1'
+      | "@public" =># '_1'
+      ;
+
+  struct_declaration
+      := sname sname ";" =># '`(objc_struct_declaration ,_1 ,_2)' // HACK: really a variable declaration
+      ;
+*/
+
+  interface_declaration
+      := declaration =># '_1'
+      | property_declaration =># '_1'
+      | method_declaration =># '_1'
+      ;
+
+  protocol_interface_declaration 
+      := method_declaration =># "_1"
+      ;
+
+  property_declaration
+      := "@property" property_attributes_declaration? instance_variable_declaration=># '`(objc_property ,_sr ,_2 ,_3)'
+      ;
+
+  property_attributes_declaration
+      := "(" list::commalist1<property_attribute> ")" =># '_2'
+      ;
+
+  property_attribute
+      := "nonatomic" =># '_1'
+      | "readwrite" =># '_1'
+      | "readonly" =># '_1'
+      | "retain" =># '_1'
+      | "assign" =># '_1'
+      | "copy" =># '_1'
+      | "strong" =># '_1'
+      | "weak" 
+      | sname "=" sname =># '`(objc_getter_ivar ,_1 ,_3)' //  getter ivar
+      | sname "=" sname ":" =># '`(objc_setter ,_1 ,_3)'  // setter
+      ;
+  method_declaration
+      := class_method_declaration =># '_1'
+      | instance_method_declaration =># '_1'
+      ;
+
+  class_method_declaration
+      := "+" method_type method_selector ";"  
+         =># '`(objc_class_method_declaration ,_sr ,_2 ,_3)'
+      ;
+
+  instance_method_declaration
+      := "-" method_type method_selector ";"
+         =># '`(objc_instance_method_declaration ,_sr ,_2 ,_3)'
+      ;
+
+  method_selector
+      := sname =># '`(objc_method_selector_name  ,_1)'
+      | keyword_selector =># '`(objc_keyword_selector  ,_1)'
+      | keyword_selector "," "..." =># '`(objc_keyword_selector_ellipsis  ,_1)'
+      ;
+
+  keyword_selector
+      := keyword_declarator+ =># "_1";
+
+  keyword_declarator
+      := sname ":" method_type =># '`(objc_keyword_declarator  ,_1 ,_3)'; 
+
+  method_type
+      := "(" stype ")" =># '_2';
+
+
+
+// TEST HACKS
+
+  implementation_definition := "IMPLEMENTATION_DEFINITION";
+  protocol_interace_declaration := "PROTOCOL_INTERFACE_DECLARATION";
+} // end syntax ObjC
+
 

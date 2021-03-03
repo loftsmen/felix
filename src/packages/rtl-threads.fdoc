@@ -37,6 +37,7 @@ static void *get_stack_pointer() {
 void thread_control_t::register_world_stop_notifier(world_stop_notifier_t *p)
 {
 //fprintf(stderr,"World stop notifier registered: %p\n", p);
+  ::std::unique_lock<::std::mutex> lck(notification_registry_mutex);
   for (size_t i=0; i<world_stop_notifier_array_length; ++i)
     if(p == world_stop_notifier_array[i]) return;
   world_stop_notifier_array = (world_stop_notifier_t**)realloc(world_stop_notifier_array, 
@@ -48,6 +49,7 @@ void thread_control_t::register_world_stop_notifier(world_stop_notifier_t *p)
 // SHOULD BE MUTEX PROTECETD
 void thread_control_t::unregister_world_stop_notifier(world_stop_notifier_t *p)
 {
+  ::std::unique_lock<::std::mutex> lck(notification_registry_mutex);
   size_t i = 0;
   for (i=0; i<world_stop_notifier_array_length; ++i)
     if(p == world_stop_notifier_array[i]) break;
@@ -73,7 +75,7 @@ bool thread_control_t::get_debug()const { return debug; }
 thread_control_base_t::~thread_control_base_t(){}
 
 thread_control_t::thread_control_t (bool d) :
-  do_world_stop(false), thread_counter(0), active_counter(0), debug(d),
+  do_world_stop(false), thread_counter(0), active_counter(0), realtime_thread_counter(0), debug(d),
   world_stop_notifier_array(0), world_stop_notifier_array_length(0)
   {
     if(debug)
@@ -92,11 +94,23 @@ size_t thread_control_t::active_count()
     return active_counter;
   }
 
-void thread_control_t::add_thread(void *stack_base)
+void thread_control_t::set_realtime() 
+  {
+     ++realtime_thread_counter;
+  }
+
+thread_data_t *thread_control_t::get_thread_data_pointer()const {
+  auto p = threads.find (mythrid());
+  assert (p != threads.end());
+  return p->second.get();
+}
+
+void thread_control_t::add_thread(void *stack_base, thread_kind_t k)
   {
     ::std::unique_lock< ::std::mutex> m(stop_mutex);
     uintptr_t id = mythrid();
-    threads.insert (std::make_pair(id, thread_data_t (stack_base)));
+    thread_data_t *ptd = new thread_data_t(stack_base,k);
+    threads.insert (std::make_pair(id,::std::unique_ptr<thread_data_t>(ptd)));
     ++thread_counter;
     ++active_counter;
     if(debug)
@@ -147,7 +161,7 @@ bool thread_control_t::world_stop()
 
     stop_guard.notify_all();
 
-    while(active_counter>1) {
+    while(active_counter - realtime_thread_counter > 1) {
       if(debug)
         for(
           thread_registry_t::iterator it = threads.begin();
@@ -155,7 +169,7 @@ bool thread_control_t::world_stop()
           ++it
         )
         {
-          fprintf(stderr, "Thread = %p is %s\n",(void*)(uintptr_t)(*it).first, (*it).second.active? "ACTIVE": "SUSPENDED");
+          fprintf(stderr, "Thread = %p is %s\n",(void*)(uintptr_t)(*it).first, (*it).second->active? "ACTIVE": "SUSPENDED");
         }
       if(debug)
         fprintf(stderr,"Thread %p Stopping world: begin wait, threads=%zu\n",  (void*)mythrid(), thread_counter);
@@ -176,9 +190,9 @@ bool thread_control_t::world_stop()
         fprintf(stderr,"MAIN THREAD: Cannot find thread %p in registry\n",(void*)(uintptr_t)id);
         abort();
       }
-      (*it).second.stack_top = stack_pointer;
+      (*it).second->stack_top = stack_pointer;
       if(debug)
-        fprintf(stderr,"Stack size = %zu\n",(size_t)((char*)(*it).second.stack_base -(char*)(*it).second.stack_top));
+        fprintf(stderr,"Stack size = %zu\n",(size_t)((char*)(*it).second->stack_base -(char*)(*it).second->stack_top));
     }
     if(debug)
       fprintf(stderr,"World STOPPED\n");
@@ -218,11 +232,11 @@ memory_ranges_t *thread_control_t::get_block_list()
     ++i
   )
   {
-    thread_data_t const &td = (*i).second;
+    thread_data_t const *ptd = (*i).second.get();
     // !(base < top) means top <= base, i.e. stack grows downwards
-    assert(!std::less<void*>()(td.stack_base,td.stack_top));
+    assert(!std::less<void*>()(ptd->stack_base,ptd->stack_top));
     // from top upto base..
-    v->push_back(memory_range_t(td.stack_top, td.stack_base));
+    v->push_back(memory_range_t(ptd->stack_top, ptd->stack_base));
   }
   return v;
 }
@@ -256,14 +270,14 @@ void thread_control_t::unsafe_suspend()
       fprintf(stderr,"[unsafe_suspend] Cannot find thread %p in registry\n",(void*)(uintptr_t)id);
       abort();
   }
-  (*it).second.stack_top = stack_pointer;
-  (*it).second.active = false;
+  (*it).second->stack_top = stack_pointer;
+  (*it).second->active = false;
   if(debug) // VC++ is bugged, doesn't support %td format correctly?
     fprintf(stderr,"[unsafe_suspend: thread=%p] stack base %p > stack top %p, Stack size = %zd\n",
       (void*)(uintptr_t)id,
-      (char*)(*it).second.stack_base,
-      (char*)(*it).second.stack_top, 
-      (size_t)((char*)(*it).second.stack_base -(char*)(*it).second.stack_top));
+      (char*)(*it).second->stack_base,
+      (char*)(*it).second->stack_top, 
+      (size_t)((char*)(*it).second->stack_base -(char*)(*it).second->stack_top));
   --active_counter;
   if(debug)
     fprintf(stderr,"[unsafe_suspend]: active thread count now %zu\n",active_counter);
@@ -290,7 +304,7 @@ void thread_control_t::unsafe_resume()
       fprintf(stderr,"[unsafe_resume: thread=%p] Cannot find thread in registry\n",(void*)(uintptr_t)id);
       abort();
   }
-  (*it).second.active = true;
+  (*it).second->active = true;
   if(debug) {
     fprintf(stderr,"[unsafe_resume: thread=%p] resumed, active count= %zu\n",
       (void*)mythrid(),active_counter);

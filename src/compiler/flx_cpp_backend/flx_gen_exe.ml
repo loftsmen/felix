@@ -613,8 +613,8 @@ print_endline ("gen_exe: " ^ string_of_bexe bsym_table 0 exe);
           let s = String.concat "," (List.map (fun x -> ge sr x) args) in
           let s =
             if mem `Requires_ptf props then
-              if String.length s > 0 then "FLX_FPAR_PASS " ^ s
-              else "FLX_FPAR_PASS_ONLY"
+              if String.length s > 0 then "ptf, " ^ s
+              else "ptf"
             else s
           in
           "  " ^ name ^ "(" ^ s ^ ");\n"
@@ -915,7 +915,7 @@ print_endline "BEXE_ASSIGN";
 
         | BEXPR_apply ((BEXPR_prj (_,d,_),_ as p), arg ),t
         | BEXPR_apply ((BEXPR_aprj (_,d,_),_ as p), arg ),t-> 
-          if islinear_type bsym_table d then split arg ((p,t)::trail)
+          if islinear_type d then split arg ((p,t)::trail)
           else let t' = snd e in ge' sr e,t',trail
         | x -> 
           print_endline src_str;

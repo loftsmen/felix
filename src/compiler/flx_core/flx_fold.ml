@@ -9,10 +9,13 @@ let fold (bsym_table: Flx_bsym_table.t) counter t =
     let ax t = aux ((depth,t')::trail) (depth+1) t in
     match t' with
     | BTYP_typeop (op,t,k) -> ax t 
+    | BTYP_compactsum ls
     | BTYP_sum ls
     | BTYP_inst (_,ls,_)
     | BTYP_vinst (_,ls,_)
+    | BTYP_compacttuple ls
     | BTYP_tuple ls -> List.iter ax ls
+    | BTYP_intersect ls -> List.iter ax ls
     | BTYP_record (ls) -> List.iter (fun (s,t) -> ax t) ls
     | BTYP_polyrecord (ls,s,v) -> List.iter (fun (s,t) -> ax t) ls; ax v
     | BTYP_variant ls -> List.iter (fun (s,t) -> ax t) ls
@@ -23,10 +26,14 @@ let fold (bsym_table: Flx_bsym_table.t) counter t =
 
     | BTYP_ptr (_,t,ts) -> ax t; List.iter ax ts
 
+    | BTYP_compactarray (a,b)
     | BTYP_array (a,b)
     | BTYP_rptsum (a,b)
+    | BTYP_compactrptsum (a,b)
     | BTYP_function (a,b) -> ax a; ax b
     | BTYP_effector (a,e, b) -> ax a; ax e; ax b
+    | BTYP_linearfunction (a,b) -> ax a; ax b
+    | BTYP_lineareffector (a,e, b) -> ax a; ax e; ax b
     | BTYP_cfunction (a,b) -> ax a; ax b
 
     | BTYP_rev a -> ax a
@@ -36,7 +43,8 @@ let fold (bsym_table: Flx_bsym_table.t) counter t =
     | BTYP_tuple_cons (a,b) -> ax a; ax b
     | BTYP_tuple_snoc (a,b) -> ax a; ax b
 
-    | BTYP_hole
+    | BTYP_instancetype _
+    | BTYP_ellipsis
     | BTYP_label 
     | BTYP_none
     | BTYP_void

@@ -255,6 +255,9 @@ print_endline ("Bind type index, trying to bind " ^id ^ "<" ^string_of_int index
       end
     with Not_found ->
       let k = Flx_guess_meta_type.guess_metatype sr t in
+(*
+print_endline ("Flx_bind_type_index: btyp_inst, meta type calculated by guess_metatype!"); 
+*)
       let t = btyp_inst (index,ts,k) in 
 (*
       print_endline ("Bind type index: INITIAL nominalising type alias " ^ id ^ 
@@ -310,7 +313,7 @@ print_endline ("bind type index, struct thing " ^ si index ^ " ts=" ^ catmap ","
     | SYMDEF_inherit_fun _
     | SYMDEF_instance _
       ->
-      clierrx "[flx_bind/flx_lookup.ml:1591: E103] " sr
+      clierrx "[flx_bind/flx_bind_type_index.ml:316: E103] " sr
       (
         "[bind_type_index] Type " ^ id ^ "<" ^ string_of_bid index ^ ">" ^
         " must be a type [alias, abstract, union, struct, virtual type], got:\n" ^

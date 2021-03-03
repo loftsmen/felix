@@ -146,6 +146,11 @@ let gen_record tname tn typs =
 
 (* this routine generates a typedef (for primitives)
 or struct declaration which names the type.
+
+If its a typedef of a primitive its a definition,
+but it must depend ONLY on types defined in C or C/C++ 
+header files, that is, not defined by Felix but previously
+injected.
 *)
 
 let rec gen_type_name syms bsym_table (index,typ) =
@@ -165,8 +170,13 @@ let rec gen_type_name syms bsym_table (index,typ) =
 
   let t = unfold "flx_tgen: gen_type_name" typ in
   match t with
-  | t when Flx_btype.islinear_type bsym_table t -> descr 
-      (* "typedef int " ^ tn typ ^ ";\n" *)
+  | t when Flx_btype.islinear_type t -> 
+
+    (* this is a bit hacked due to bug in naming rules *)
+    let cntyp = cn typ in
+    "\n//TYPE " ^ string_of_bid index ^ ": " ^ sbt bsym_table typ ^ "\n" ^
+    (if cntyp = " ::flx::rtl::cl_t" then "// " else "") ^
+    "typedef ::flx::rtl::cl_t " ^ cntyp ^ ";\n"
 
   | BTYP_fix (i,_) -> ""
   | BTYP_type_var (i,mt) -> failwith "[gen_type_name] Can't gen name of type variable"
@@ -178,6 +188,13 @@ let rec gen_type_name syms bsym_table (index,typ) =
     "typedef " ^ tn b ^ " *"^ tn t ^ ";\n"
     *)
 
+  (* maybe this should be a struct tag instead: it's a phantom and at present
+     an incomplete type would do
+  *)
+  | BTYP_intersect _ -> 
+    "// hack for intersection types\n" ^
+    "typedef void *" ^ cn typ ^ ";"
+
   | BTYP_tuple _
   | BTYP_record _
   | BTYP_array _ ->
@@ -185,29 +202,13 @@ let rec gen_type_name syms bsym_table (index,typ) =
     let name = cn typ in
     "struct " ^ name ^ ";\n"
 
+  | BTYP_linearfunction _ 
   | BTYP_function _ ->
     descr ^
     let name = cn typ in
     "struct " ^ name ^ ";\n"
 
-  | BTYP_cfunction (d,c) ->
-    descr ^
-    let name = cn typ in
-    let ds = match d with
-      | BTYP_tuple ls -> ls
-      | BTYP_array (t,n) -> (* not sure if this is enough or even right .. *) 
-        begin match n with
-        | BTYP_unitsum n ->
-          let rec aux ls n = if n = 0 then ls else aux (t::ls) (n-1) in 
-          aux [] n
-        | _ -> failwith "flx_tgen unexpected array indexed by non-unit sum"
-        end
-      | x -> [x]
-    in
-    let ctn t = `Ct_base (cpp_typename syms bsym_table t) in
-    let t = `Ct_fun (ctn c,map ctn ds) in
-    let cdt = `Cdt_value t in
-    "typedef " ^ string_of_cdecl_type name cdt ^ ";\n"
+  | BTYP_cfunction (d,c) -> descr ^ "\n"
 
   | BTYP_rptsum _ 
   | BTYP_sum _ 
@@ -365,13 +366,32 @@ let rec gen_type syms bsym_table (index,typ) =
   in
   let t = unfold "flx_tgen: gen_type" typ in
   match t with
-  | _ when islinear_type bsym_table t -> ""
+  | _ when islinear_type t -> descr
   | BTYP_type_var _ -> failwith "[gen_type] can't gen type variable"
   | BTYP_fix _ -> failwith "[gen_type] can't gen type fixpoint"
 
   (* PROCEDURE *)
-  | BTYP_cfunction _ -> ""
+  | BTYP_cfunction (d,c) ->
+    let name = cn typ in
+    let ds = match d with
+      | BTYP_tuple ls -> ls
+      | BTYP_array (t,n) -> (* not sure if this is enough or even right .. *) 
+        begin match n with
+        | BTYP_unitsum n ->
+          let rec aux ls n = if n = 0 then ls else aux (t::ls) (n-1) in 
+          aux [] n
+        | _ -> failwith "flx_tgen unexpected array indexed by non-unit sum"
+        end
+      | x -> [x]
+    in
+    let ctn t = `Ct_base (cpp_typename syms bsym_table t) in
+    let t = `Ct_fun (ctn c,map ctn ds) in
+    let cdt = `Cdt_value t in
+    "typedef " ^ string_of_cdecl_type name cdt ^ ";\n"
 
+
+  | BTYP_linearfunction (a,BTYP_fix (0,_))
+  | BTYP_linearfunction (a,BTYP_void) 
   | BTYP_function (a,BTYP_fix (0,_))
   | BTYP_function (a,BTYP_void) ->
     descr ^
@@ -394,6 +414,7 @@ let rec gen_type syms bsym_table (index,typ) =
     "};\n"
 
   (* FUNCTION *)
+  | BTYP_linearfunction (a,r)
   | BTYP_function (a,r) ->
     descr ^
     let name = cn typ
@@ -416,12 +437,18 @@ let rec gen_type syms bsym_table (index,typ) =
   | BTYP_variant _ -> ""
 
   | BTYP_tuple ts ->
-     descr ^
-     gen_tuple (tn typ) tn ts
+    begin match List.rev ts with
+    | BTYP_ellipsis :: tail -> descr
+    | _ ->
+      descr ^
+      gen_tuple (tn typ) tn ts
+    end
 
   | BTYP_record (ts) ->
      descr ^
      gen_record (cn typ) tn ts
+
+  | BTYP_intersect _ -> ""
 
   | BTYP_ptr _ ->  ""
     (*

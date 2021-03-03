@@ -205,7 +205,9 @@ let cpp_instance_name syms bsym_table index ts =
 let tix msg syms bsym_table t =
   let t =
     match t with
+    | BTYP_linearfunction (BTYP_void,cod) -> btyp_function (btyp_tuple [],cod)
     | BTYP_function (BTYP_void,cod) -> btyp_function (btyp_tuple [],cod)
+    | BTYP_linearfunction (dom,cod) -> btyp_function (dom,cod)
     | x -> x
   in
   let t' = Flx_fold.minimise bsym_table syms.counter t in
@@ -227,14 +229,13 @@ print_endline ("Flx_tgen.cpp_type_classname " ^ sbt bsym_table t);
   let t' = unfold "flx_name: cpp_type_classname" t in
   try match t' with
 
+  | BTYP_instancetype sr -> "void*/*instancetype*/"
   | BBOOL _ -> assert false
   | BTYP_typeop _ -> assert false
   | BTYP_typeof _ -> assert false
-  | BTYP_hole -> assert false
   | BTYP_uniq _ -> assert false
-  | BTYP_ptr (`R,_,_) -> assert false
-  | BTYP_ptr (`W,_,_) -> assert false
   | BTYP_ptr (_,_,(_::_::_)) -> assert false
+  | BTYP_ellipsis -> "..."
 
   | BTYP_type_var (i,mt) ->
       failwith ("[cpp_type_classname] Can't name type variable " ^
@@ -243,12 +244,28 @@ print_endline ("Flx_tgen.cpp_type_classname " ^ sbt bsym_table t);
   | BTYP_none -> "none" (* hack needed for null case in pgen *)
   | BTYP_void -> (* print_endline "WARNING cpp_type_classname of void"; *) "void" (* failwith "void doesn't have a classname" *)
   | BTYP_label -> " ::flx::rtl::jump_address_t" (* space required cause X<::y> is trigraph *)
+
+  (* unit sums have special name *)
+  | BTYP_unitsum k -> "_us" ^ string_of_int k
+
+
+  | BTYP_compacttuple _
+  | BTYP_compactarray _
+  | BTYP_compactsum _
+  | BTYP_compactrptsum _
   | BTYP_tuple [] -> " ::flx::rtl::cl_t" (* COMPACT LINEAR! *)
-  | t when islinear_type bsym_table t -> " ::flx::rtl::cl_t"
 
-  | BTYP_ptr (_,t',[]) -> cpp_type_classname syms bsym_table t' ^ "*"
-  | BTYP_ptr (_,c,[d]) -> "::flx::rtl::clptr_t";
+  | BTYP_ptr (`N,t',[]) -> assert false (* should be NULL .. *)
+  | BTYP_ptr (`RW,t',[]) -> cpp_type_classname syms bsym_table t' ^ "*"
+  | BTYP_ptr (`R,t',[]) -> cpp_type_classname syms bsym_table t' ^ " const*"
+  | BTYP_ptr (`W,t',[]) -> cpp_type_classname syms bsym_table t' ^ " *"
 
+  | BTYP_ptr (`N,c,[d]) -> assert false
+  | BTYP_ptr (`RW,c,[d]) -> "::flx::rtl::clptr_t";
+  | BTYP_ptr (`R,c,[d]) -> "::flx::rtl::const_clptr_t";
+  | BTYP_ptr (`W,c,[d]) -> "::flx::rtl::clptr_t";
+
+  | BTYP_lineareffector (d,e,c)
   | BTYP_effector (d,e,c) -> 
     print_endline ("[Flx_name:cpp_type_classname] Attempt to name effector type in code generator:" ^ sbt bsym_table t');
     print_endline (" .. using equivalent function type instead");
@@ -258,9 +275,13 @@ print_endline ("Flx_tgen.cpp_type_classname " ^ sbt bsym_table t);
   | BTYP_function (_,BTYP_void) -> "_pt" ^ cid_of_bid (tix t)
   | BTYP_function _ -> "_ft" ^ cid_of_bid (tix t)
 
+  | BTYP_linearfunction (_,BTYP_void) -> "_pt" ^ cid_of_bid (tix t)
+  | BTYP_linearfunction _ -> "_ft" ^ cid_of_bid (tix t)
+
   | BTYP_cfunction _ -> "_cft" ^ cid_of_bid (tix t)
   | BTYP_array _ -> "_at" ^ cid_of_bid (tix t)
   | BTYP_tuple _ -> "_tt" ^ cid_of_bid (tix t)
+  | BTYP_intersect _ -> "_intersection" ^ cid_of_bid (tix t)
   | BTYP_tuple_cons _ -> "_tt" ^ cid_of_bid (tix t)
   | BTYP_tuple_snoc _ -> "_tt" ^ cid_of_bid (tix t)
 (*  | BTYP_tuple ts -> "_tt"^string_of_int (List.length ts)^"<" ^ catmap "," tn ts ^ ">"  *)
@@ -283,8 +304,6 @@ print_endline ("Flx_tgen.cpp_type_classname " ^ sbt bsym_table t);
     | Flx_vrep.VR_packed -> "void*"
     | Flx_vrep.VR_uctor -> " ::flx::rtl::_uctor_"
     end
-
-  | BTYP_unitsum k -> "_us" ^ string_of_int k
 
   | BTYP_vinst (i,ts,_) -> assert false
 
@@ -395,6 +414,10 @@ print_endline ("[flx_name] One component union should have been removed");
       " to be in registry"
     )
 
+(* Note this isn't used except in comments at the moment.
+It's an attempt to use C++ templates to provide unique names.
+This is required for linkage across Felix generated binary objects
+*)
 and cpp_structure_name syms bsym_table t =
   let tn t = cpp_typename syms bsym_table t in
   let tix t = tix "[flx_name:cpp_structure_name]" syms bsym_table t in
@@ -407,16 +430,28 @@ and cpp_structure_name syms bsym_table t =
   | BTYP_fix (i,_) -> "_fix<"^string_of_int (-i)^">" (* failwith "[cpp_type_classname] Can't name type fixpoint" *)
   | BTYP_none -> "none" (* hack needed for null case in pgen *)
   | BTYP_void -> print_endline ("WARNING cpp_structure_name of void"); "void" (* failwith "void doesn't have a classname" *)
-  | BTYP_tuple [] -> "int" (* COMPACT LINEAR! *)
+  | BTYP_tuple [] -> "::flx::rtl::cl_t" (* COMPACT LINEAR! *)
 
-  | BTYP_ptr (_,t',[]) -> cpp_type_classname syms bsym_table t' ^ "*"
+  | BTYP_ptr (`RW,t',[]) -> cpp_type_classname syms bsym_table t' ^ "*"
+  | BTYP_ptr (`R,t',[]) -> cpp_type_classname syms bsym_table t' ^ " const*"
+  | BTYP_ptr (`W,t',[]) -> cpp_type_classname syms bsym_table t' ^ " *"
   | BTYP_ptr (_,c,[d]) -> "::flx::rtl::clptr_t";
  
   | BTYP_effector (d,_,BTYP_void) -> "_pt<" ^tn d ^ ">"
   | BTYP_effector (d,_,c) -> "_ft<" ^ tn d ^ "," ^ tn c ^ ">" 
   | BTYP_function (d,BTYP_void) -> "_pt<" ^tn d ^ ">"
   | BTYP_function (d,c) -> "_ft<" ^ tn d ^ "," ^ tn c ^ ">" 
+
+  | BTYP_lineareffector (d,_,BTYP_void) -> "_pt<" ^tn d ^ ">"
+  | BTYP_lineareffector (d,_,c) -> "_ft<" ^ tn d ^ "," ^ tn c ^ ">" 
+  | BTYP_linearfunction (d,BTYP_void) -> "_pt<" ^tn d ^ ">"
+  | BTYP_linearfunction (d,c) -> "_ft<" ^ tn d ^ "," ^ tn c ^ ">" 
+
   | BTYP_cfunction (d,c) -> "_cft<" ^  tn d ^ "," ^ tn c ^">"
+
+  | BTYP_compacttuple _
+  | BTYP_compactarray _ -> "::flx::rtl::cl_t"
+  
   | BTYP_array (e,BTYP_unitsum i) -> "_at<" ^ tn e ^ "," ^ string_of_int i ^ ">" 
   | BTYP_array (e,i) -> 
      (*failwith ("Generalisd arrays not supported") *)
@@ -424,6 +459,9 @@ and cpp_structure_name syms bsym_table t =
 
   | BTYP_tuple ts -> "_tt"^string_of_int (List.length ts)^"<" ^ catmap "," tn ts ^ ">" 
   | BTYP_record _  -> "_art" ^ cid_of_bid (tix t)
+ 
+  (* will work with ObjC protocols, but probably should be a C union of the intersectees .. *)
+  | BTYP_intersect _ -> "void*" 
 
   | BTYP_variant _ -> "::flx::rtl::_uctor_"
 
@@ -507,8 +545,12 @@ and cpp_typename syms bsym_table t =
   match unfold "flx_name: cpp_typename" t with
   | BTYP_effector _ -> cpp_type_classname syms bsym_table t ^ "*"
   | BTYP_function _ -> cpp_type_classname syms bsym_table t ^ "*"
+  | BTYP_lineareffector _ -> cpp_type_classname syms bsym_table t ^ "*"
+  | BTYP_linearfunction _ -> cpp_type_classname syms bsym_table t ^ "*"
   | BTYP_cfunction _ -> cpp_type_classname syms bsym_table t ^ "*"
-  | BTYP_ptr (_,t,[]) -> cpp_typename syms bsym_table t ^ "*"
+  | BTYP_ptr (`RW,t,[]) -> cpp_typename syms bsym_table t ^ "*"
+  | BTYP_ptr (`R,t,[]) -> cpp_typename syms bsym_table t ^ " const*"
+  | BTYP_ptr (`W,t,[]) -> cpp_typename syms bsym_table t ^ "*"
   | _ -> cpp_type_classname syms bsym_table t
 
 let cpp_ltypename syms bsym_table t = cpp_typename syms bsym_table t

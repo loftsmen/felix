@@ -18,6 +18,7 @@ open Flx_cexpr
    #0: return type
    @n: shape of n'th argument's type
    @0: shape of return type
+   @@: returns @
 
    $t: pass a tuple argument 'as a tuple'
    $Tn: pass argument n expanded into an argument list (varargs)
@@ -184,6 +185,20 @@ let csubst (shape_registry:Flx_set.StringSet.t ref) sr sr2 ct
 
     | Dollar ->
       begin match ch with
+      | 'i' ->
+        (* this is a BAD HACK!!! *)
+        begin match args with
+        | [`Ce_atom s] -> 
+          (* ::std::string("ident") --> ident *)
+          let n = String.length s in
+          let start = 15 in
+          let length = n - start - 2 in
+          let s = String.sub s start length in
+          bcat s  
+        | _ -> serr i "Argument must be string wrapping identifier"
+        end;
+        mode := Normal
+
       | 'a' ->
         bcat (catmap ", " string_of_cexpr args);
         mode := Normal
@@ -266,6 +281,9 @@ print_endline "";
       | '0' .. '9' ->
         digits := Char.code ch - Char.code '0';
         mode := EarholeDigits
+
+      | '@' ->
+        chcat '@'; mode := Normal
 
       | _ -> serr i "Expected 't' or digit after @"
       end

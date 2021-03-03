@@ -1,0 +1,110 @@
+include "std/apple/Foundation";
+include "std/apple/AppKit";
+
+header small_class_interface = c"""
+@interface SmallClass: NSObject { }
+- (int)get1977;
+@end
+""";
+
+body small_class_implementation = c"""
+@implementation SmallClass
+- (instancetype)init {
+	self = [super init];
+	return self;
+}
+- (int)get1977 {
+	return 1977;
+}
+- (int)getsum: (int)toadd {
+  return 1977 + toadd;
+}
+
+@end
+""";
+
+
+type small_class_instance_t = "void*"  requires 
+  small_class_interface, 
+  small_class_implementation
+;
+
+fun make_small_class_instance:
+  1 -> small_class_instance_t 
+= 
+  "[[SmallClass alloc] init]"
+;
+
+fun get1977 : small_class_instance_t -> int = "[$1 get1977]";
+
+var small_class_instance = make_small_class_instance();
+var result = get1977 small_class_instance;
+println$ "Felix ran objc to get " + result.str;
+
+var s = @"An NS String";
+var icode = @"get 1977 %i";
+
+NSLog (icode, result);
+NSLog(s);
+
+var o = C_hack::cast[NSObject] @"hello";
+
+var x = @[o,o,o];
+proc NSLogArray: NSArray  = 'NSLog(@@"%@@",$1);';
+NSLogArray x;
+
+println$ @selector(Hello);
+
+var y = @1.23;
+NSLog (y);
+var z = @22u;
+NSLog (z);
+
+fun objc_box[T]: T -> NSObject = "@@($1)";
+
+var a = @(42);
+NSLog a;
+
+// message sending
+
+var result2 = cexpr[int] "[$1 get1977]" small_class_instance endcexpr;
+
+fun thing (x:small_class_instance_t) => 
+  cexpr[int] "[$1 get1977]" x endcexpr;
+;
+
+fun thing2 : small_class_instance_t -> int = "[$1 get1977]";
+
+NSLog (@"R2 = %i", result2);
+NSLog (@"R2 = %i", thing small_class_instance);
+NSLog (@"R2 = %i", thing2 small_class_instance);
+
+var xxx = 11;
+println$ q"$(xxx)";
+
+println$ f"%S == %i" ("hello", 45); 
+
+NSLog(@"%i,%i", 45, 73);
+
+// Subtyping check
+proc hacklog(x: NSObject) => NSLog (@"Object = %@",  x);
+
+hacklog (@"Hello");
+
+var sound = AppKit::loadSound @"../async/felix-audio/testaudio.wav";
+AppKit::play sound;
+Faio::sleep (5.0);
+
+open syntax ObjC;
+
+begin 
+  objc-bind 
+    @interface small_class 
+    +(instancetype) alloc;
+    -(instancetype) init;
+    -(int) get1977;
+    -(int) getsum: (int);
+    @end
+  ;
+  println$ "NESTED " + (small_class'alloc.init.getsum' 44).str; 
+end

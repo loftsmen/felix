@@ -212,6 +212,7 @@ and string_of_expr (e:expr_t) =
     "(" ^ se a ^ " ^ " ^ se b ^ ")"
 
   | `EXPR_tuple (_,t) -> "(" ^ catmap ", " se t ^ ")"
+  | `EXPR_compacttuple (_,t) -> "(" ^ catmap "\\, " se t ^ ")"
   | `EXPR_get_tuple_tail (_,t) -> "get_tuple_tail(" ^ se t ^ ")"
   | `EXPR_get_tuple_head (_,t) -> "get_tuple_head(" ^ se t ^ ")"
   | `EXPR_get_tuple_body(_,t) -> "get_tuple_body(" ^ se t ^ ")"
@@ -237,6 +238,9 @@ and string_of_expr (e:expr_t) =
 
   | `EXPR_remove_fields (_,e,ss) -> 
     "(" ^ se e ^ " minus fields " ^ String.concat "," ss ^ ")"
+
+  | `EXPR_getall_field (_,e,s) ->
+     "(" ^ se e ^ " getall " ^ s ^ ")"
 
   | `EXPR_variant (_, (s, e)) -> "case " ^ string_of_id s ^ " of (" ^ se e ^ ")"
 
@@ -350,6 +354,7 @@ and string_of_expr (e:expr_t) =
 and str_of_kindcode k : string =
   match k with
   | KND_type -> "TYPE"
+  | KND_linear -> "LINEAR"
   | KND_unitsum -> "UNITSUM"
   | KND_compactlinear -> "COMPACTLINEAR"
   | KND_bool -> "BOOL"
@@ -363,20 +368,17 @@ and str_of_kindcode k : string =
 
 
 and st prec tc : string =
+  let show_effects t = match t with `TYP_tuple [] -> "" | _ -> "[" ^ string_of_typecode t ^ "]" in
   let iprec,txt =
     match tc with
     | `TYP_bool b -> 0,(if b then "TRUE" else "FALSE")
-    | `TYP_defer (sr,t) -> 
-      begin match !t with 
-      | None -> 0,"(DEFER:unset)" 
-      | Some t -> 0,"(DEFER:"^string_of_typecode t^")" 
-      end
     | `TYP_tuple_cons (sr, t1, t2) -> 6, st 4 t1 ^ "**" ^ st 4 t2
     | `TYP_tuple_snoc (sr, t1, t2) -> 6, st 4 t1 ^ "<**>" ^ st 4 t2
     | `TYP_pclt (a,b) -> 0, "_pclt<" ^ string_of_typecode a ^ "," ^ string_of_typecode b ^ ">"
     | `TYP_rpclt (a,b) -> 0, "_rpclt<" ^ string_of_typecode a ^ "," ^ string_of_typecode b ^ ">"
     | `TYP_wpclt (a,b) -> 0, "_wpclt<" ^ string_of_typecode a ^ "," ^ string_of_typecode b ^ ">"
     | `TYP_rptsum (d,c) -> 6, st 4 d ^ "*+" ^ st 4 c
+    | `TYP_compactrptsum (d,c) -> 6, "compact(" ^ st 4 d ^ "\\*+" ^ st 4 c ^ ")"
 
     | `TYP_index (sr,name,idx) -> 0, name ^ "<" ^ string_of_bid idx ^ ">"
     | `TYP_label -> 0, "LABEL"
@@ -443,6 +445,20 @@ and st prec tc : string =
       | _ -> 4, cat " * " (map (st 4) ls)
       end
 
+    | `TYP_intersect ls ->
+      begin match ls with
+      | [] -> 0,"unit"
+      | _ -> 4, cat " & " (map (st 4) ls)
+      end
+
+
+
+    | `TYP_compacttuple ls ->
+      begin match ls with
+      | [] -> 0,"unit"
+      | _ -> 0, "compact(" ^ cat " \\* " (map (st 4) ls) ^ ")"
+      end
+
     | `TYP_record ls ->
       begin match ls with
       | [] -> 0,"unit"
@@ -474,8 +490,15 @@ and st prec tc : string =
     | `TYP_sum ls ->
       begin match ls with
       | [] -> 0,"void"
-      | [`TYP_tuple[];`TYP_tuple[]] -> 0,"bool"
       | _ -> 5,cat " + " (map (st 5) ls)
+      end
+
+
+    | `TYP_compactsum ls ->
+      begin match ls with
+      | [] -> 0,"void"
+      | [`TYP_tuple[];`TYP_tuple[]] -> 0,"bool"
+      | _ -> 5,"compact(" ^ cat " \\+ " (map (st 5) ls) ^ ")"
       end
 
     | `TYP_typeset ls ->
@@ -500,13 +523,21 @@ and st prec tc : string =
       9,st 9 args ^ " -> " ^ st 9 result
 
     | `TYP_effector (args, effects, result) ->
-      9,st 9 args ^ " ->["^st 0 effects^"] " ^ st 9 result
+      9,st 9 args ^ " ->"^show_effects effects^" " ^ st 9 result
+
+
+    | `TYP_linearfunction (args, result) ->
+      9,st 9 args ^ " ->. " ^ st 9 result
+
+    | `TYP_lineareffector (args, effects, result) ->
+      9,st 9 args ^ " ->."^show_effects effects^" " ^ st 9 result
 
 
     | `TYP_cfunction (args, result) ->
       9,st 9 args ^ " --> " ^ st 9 result
 
     | `TYP_array (vt,it) -> 3, st 1 vt ^ "^" ^ st 3 it
+    | `TYP_compactarray (vt,it) -> 3, st 1 vt ^ "\\^" ^ st 3 it
 
     | `TYP_pointer t -> 1,"&" ^ st 1 t
     | `TYP_rref t -> 1,"rref[" ^ st 1 t ^ "]"
@@ -610,6 +641,7 @@ and string_of_fixpoints depth fixlist =
 
 and sb bsym_table depth fixlist counter prec tc =
   let sbt prec t = sb bsym_table (depth+1) fixlist counter prec t in
+  let show_effects e = (match e with | BTYP_tuple [] -> "" | _ -> "[" ^ string_of_btypecode bsym_table e ^ "]") in
   let iprec, term =
     match tc with
     | BBOOL b -> 0,("BBOOL " ^ string_of_bool b)
@@ -619,8 +651,9 @@ and sb bsym_table depth fixlist counter prec tc =
     | BTYP_typeof (i,t) -> 0,
       "typeof<context=" ^ string_of_int i ^ ">(" ^ string_of_expr t ^ ")"
 
-    | BTYP_hole -> 0, "BTYP_hole"
+    | BTYP_instancetype sr -> 0,"instancetype"
     | BTYP_none -> 0,"none"
+    | BTYP_ellipsis -> 0,"..."
     | BTYP_label -> 0,"label"
     | BTYP_tuple_cons (t1,t2) -> 
       5,(sbt 5 t1) ^ " ** " ^ (sbt 5 t2)
@@ -694,11 +727,26 @@ and sb bsym_table depth fixlist counter prec tc =
       "[" ^cat ", " (map (sbt 9) ts) ^ "]:" ^ sk mt
       )
 
+    | BTYP_intersect ls ->
+      begin match ls with
+      | [] -> 0,"unit"
+      | [x] -> failwith ("UNEXPECTED INTERSECTION OF ONE ARGUMENT " ^ sbt 9 x)
+      | _ -> 4,cat " & " (map (sbt 4) ls)
+      end
+
+
     | BTYP_tuple ls ->
       begin match ls with
       | [] -> 0,"unit"
       | [x] -> failwith ("UNEXPECTED TUPLE OF ONE ARGUMENT " ^ sbt 9 x)
       | _ -> 4,cat " * " (map (sbt 4) ls)
+      end
+
+    | BTYP_compacttuple ls ->
+      begin match ls with
+      | [] -> 0,"unit"
+      | [x] -> failwith ("UNEXPECTED TUPLE OF ONE ARGUMENT " ^ sbt 9 x)
+      | _ -> 4,"compact("^cat " \\* " (map (sbt 4) ls)^")"
       end
 
     | BTYP_rev t -> 0, "_rev(" ^ sbt 0 t ^ ")"
@@ -752,6 +800,20 @@ and sb bsym_table depth fixlist counter prec tc =
           5,cat " + " (map (sbt 5) ls)
       end
 
+    | BTYP_compactsum ls ->
+      begin match ls with
+      | [] -> 9,"UNEXPECTED EMPTY SUM = void"
+      | [BTYP_tuple[]; BTYP_tuple[]] -> 0,"unexpected bool"
+      | [x] -> (* failwith *) (9,"UNEXPECTED SUM OF ONE ARGUMENT " ^ sbt 9 x)
+      | _ ->
+        if (all_units ls)
+        then
+          0,si (length ls)
+        else
+          5,"compact("^cat " \\+ " (map (sbt 5) ls)^")"
+      end
+
+
     | BTYP_type_set ls ->
       begin match ls with
       | [] -> 9,"UNEXPECTED EMPTY TYPESET = void"
@@ -777,7 +839,13 @@ and sb bsym_table depth fixlist counter prec tc =
       6,(sbt 6 args) ^ " -> " ^ (sbt 6 result)
 
     | BTYP_effector (args, effects, result) ->
-      6,(sbt 6 args) ^ " ->["^sbt 0 effects^"] " ^ (sbt 6 result)
+      6,(sbt 6 args) ^ " ->"^show_effects effects^" " ^ (sbt 6 result)
+
+    | BTYP_linearfunction (args, result) ->
+      6,(sbt 6 args) ^ " ->. " ^ (sbt 6 result)
+
+    | BTYP_lineareffector (args, effects, result) ->
+      6,(sbt 6 args) ^ " ->."^show_effects effects^" " ^ (sbt 6 result)
 
 
     | BTYP_cfunction (args, result) ->
@@ -789,11 +857,25 @@ and sb bsym_table depth fixlist counter prec tc =
       | _ -> 3, sbt 3 t1 ^"*+"^sbt 3 t2
       end
 
+    | BTYP_compactrptsum (t1,t2) ->
+      begin match t1 with
+      | BTYP_unitsum k -> 3, "compact("^si k ^"\\*+"^sbt 3 t2^")"
+      | _ -> 3, "compact("^sbt 3 t1 ^"\\*+"^sbt 3 t2^")"
+      end
+
+
     | BTYP_array (t1,t2) ->
       begin match t2 with
       | BTYP_unitsum k -> 3, sbt 3 t1 ^"^"^si k
       | _ -> 3, sbt 3 t1 ^"^"^sbt 3 t2
       end
+
+    | BTYP_compactarray (t1,t2) ->
+      begin match t2 with
+      | BTYP_unitsum k -> 3, "compact(" ^ sbt 3 t1 ^"\\^"^si k ^ ")"
+      | _ -> 3, "compact(" ^ sbt 3 t1 ^"\\^"^sbt 3 t2 ^ ")"
+      end
+
 
     | BTYP_ptr (m,t,ts) -> 1,str_of_pmode m^"ptr(" ^ sbt 1 t^",["^catmap "," (sbt 1) ts ^"])"
 
@@ -873,7 +955,9 @@ and string_of_parameters (ps:params_t) =
   let ps, traint = ps in
   string_of_paramspec_t ps ^
   (match traint with
-  | Some x -> " where " ^ string_of_expr x
+  | Some x -> 
+    (* super hacky .. *)
+    let s = string_of_expr x in if s = "TRUE" then "" else " where " ^ s
   | None -> ""
   )
 
@@ -1000,6 +1084,7 @@ and string_of_maybe_kindcode = function
 
 
 and string_of_tconstraint = function
+  | `TYP_bool true -> ""
   | t -> let x = string_of_typecode t in
     if x <> "any" then " where " ^ x else ""
 
@@ -1025,7 +1110,9 @@ and string_of_ivs (ivs,({raw_type_constraint=tcon; raw_typeclass_reqs=rtcr} as c
         (fun (name,ix,tpat) -> string_of_id name ^ string_of_maybe_kindcode tpat)
         ivs
       in
-      Printf.sprintf "[%s%s]" ivs (string_of_tcon con)
+      let s = string_of_tcon con in
+      let ivs_s = ivs ^ s in
+      if ivs_s = "" then "" else "[" ^ ivs_s ^ "]"
 
 and string_of_vs (vs,({raw_type_constraint=tcon; raw_typeclass_reqs=rtcr} as con)) =
   match vs,tcon,rtcr with
@@ -1035,7 +1122,9 @@ and string_of_vs (vs,({raw_type_constraint=tcon; raw_typeclass_reqs=rtcr} as con
         (fun (name,tpat) -> string_of_id name ^ string_of_maybe_kindcode tpat)
         vs
       in
-      Printf.sprintf "[%s%s]" vs (string_of_tcon con)
+      let s = string_of_tcon con in
+      let vs_s = vs ^ s in
+      if vs_s = "" then "" else "[" ^ vs_s ^ "]"
 
 and string_of_plain_vs vs =
   catmap ", "
@@ -1114,6 +1203,7 @@ and string_of_property = function
 | `NamedExport s -> "export "^ string_of_string s
 | `Service_call -> "Does_service_call"
 | `NoService_call -> "No_service_call"
+| `LinearFunction -> "LinearFunction"
 
 and string_of_properties ps =
   match ps with
@@ -1243,6 +1333,7 @@ and string_of_statements level ss = String.concat "" (List.map (fun s -> string_
 and string_of_funkind kind = 
   match kind with
     | `Function -> "fun"
+    | `LinearFunction -> "linear fun"
     | `CFunction -> "cfun"
     | `GeneratedInlineProcedure -> "inline procedure(generated,block)"
     | `GeneratedInlineFunction-> "inline function(lambda)"
@@ -1254,6 +1345,11 @@ and string_of_funkind kind =
     | `GeneratorMethod-> "method generator"
     | `Method-> "method"
     | `Object -> "object"
+
+and string_of_effects t =
+  match t with
+  | `TYP_tuple [] -> "" 
+  | _ ->  "[" ^ string_of_typecode t ^ "]"
 
 and string_of_statement level s =
   let se e = string_of_expr e in
@@ -1520,7 +1616,7 @@ and string_of_statement level s =
     spaces level ^
     string_of_properties props ^
     "fun " ^ string_of_id name ^ string_of_vs vs ^
-    "("^string_of_parameters ps^"):["^string_of_typecode effects^"] "^string_of_typecode res^
+    "("^string_of_parameters ps^"):" ^ string_of_effects effects^" "^string_of_typecode res^
     (match post with
     | None -> ""
     | Some x -> " when " ^ string_of_expr x
@@ -1540,7 +1636,7 @@ and string_of_statement level s =
     )
     pss
     ^
-    ":["^string_of_typecode effects^"] "^string_of_typecode res^
+    ":"^string_of_effects effects^" "^string_of_typecode res^
     (match traint with
     | None -> ""
     | Some x -> " when " ^ string_of_expr x
@@ -2090,8 +2186,8 @@ and string_of_bound_expression' bsym_table se e =
   let st t = sbt bsym_table t in
   let sid n = bound_name_of_bindex bsym_table n in
   match fst e with
-  | BEXPR_cltpointer (d,c,p,v) -> "cltpointer(" ^ se p ^ ":" ^ st d ^"," ^ si v ^"(" ^ st c ^"))"
-  | BEXPR_cltpointer_prj (d,c,v) -> "cltpointer_prj(" ^ st d ^ "," ^ st c ^ "," ^ si v^")"
+  | BEXPR_cltpointer (d,c,p,v) -> "cltpointer(" ^ se p ^ ":" ^ st d ^"[" ^ catmap "," si v ^"](" ^ st c ^"))"
+  | BEXPR_cltpointer_prj (d,c,v) -> "cltpointer_prj(" ^ st d ^ "," ^ st c ^ ",[" ^ catmap "," si v^"])"
   | BEXPR_lambda (i,t,e) -> "lamda<"^si i^":"^sbt bsym_table t^">(" ^se e^")"
   | BEXPR_cond (c,t,f) -> "if " ^ se c ^ " then " ^ se t ^ " else " ^ se f ^ " endif"
   | BEXPR_unitptr k -> 
@@ -2161,6 +2257,7 @@ and string_of_bound_expression' bsym_table se e =
     ")"
 
   | BEXPR_tuple t -> "(" ^ catmap ", " se t ^ ")"
+  | BEXPR_compacttuple t -> "(" ^ catmap "\\, " se t ^ ")"
 
   | BEXPR_record ts -> "( " ^
       catmap ", " (fun (s,e)-> s^":"^ se e) ts ^ ")"
@@ -2170,6 +2267,10 @@ and string_of_bound_expression' bsym_table se e =
 
   | BEXPR_remove_fields (e,ss) ->
      "(" ^ se e ^ " minus fields " ^ String.concat "," ss ^ ")"
+
+  | BEXPR_getall_field (e,s) ->
+     "(" ^ se e ^ " getallfields " ^ s ^ ")"
+
 
   | BEXPR_case (v,t) ->
     "(case " ^ si v ^ " of " ^ string_of_btypecode (Some bsym_table) t ^ ")"
@@ -2509,7 +2610,7 @@ and string_of_dcl level name seq vs (s:dcl_t) =
     sl ^
     string_of_properties props ^
     "fun " ^ string_of_id name ^ seq ^ string_of_vs vs ^
-    "("^ (string_of_parameters ps)^"):["^st effects^"] "^(st res)^"\n" ^
+    "("^ (string_of_parameters ps)^"):"^string_of_effects effects^" "^(st res)^"\n" ^
     string_of_asm_compound level ss
 
 
@@ -2985,7 +3086,7 @@ let print_sym sym_table bid =
 
 let print_sym_table sym_table =
   let syms = Flx_sym_table.fold (fun k _ v acc -> (k,v) :: acc) sym_table [] in
-  let syms = List.sort (fun (k1,_) (k2,_) -> compare k1 k2) syms in
+  let syms = List.sort (fun (k1,_) (k2,_) -> Stdlib.compare k1 k2) syms in
 
   List.iter (fun (bid, _) -> print_sym sym_table bid) syms
 
@@ -3019,7 +3120,7 @@ let print_bsym_table bsym_table =
     bsym_table
     []
   in
-  let bsyms = List.sort (fun (k1,_) (k2,_) -> compare k1 k2) bsyms in
+  let bsyms = List.sort (fun (k1,_) (k2,_) -> Stdlib.compare k1 k2) bsyms in
 
   List.iter (fun (bid, _) -> print_bsym bsym_table bid) bsyms;
   print_endline ("=============  END TABLE ======================");

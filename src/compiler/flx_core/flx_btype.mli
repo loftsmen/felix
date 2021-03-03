@@ -19,15 +19,21 @@ type btpattern_t = {
 and pvpiece_t = [`Ctor of (string * t) | `Base of t]
 and t = private
   | BBOOL of bool 
-  | BTYP_hole
+  | BTYP_instancetype of Flx_srcref.t
+  | BTYP_ellipsis (* only at end of a tuple, matches rest of argument tuple, for varargs *)
   | BTYP_none
   | BTYP_sum of t list
+  | BTYP_compactsum of t list
   | BTYP_unitsum of int
   | BTYP_inst of bid_t * t list * Flx_kind.kind
   | BTYP_vinst of bid_t * t list * Flx_kind.kind
+  | BTYP_intersect of t list
   | BTYP_tuple of t list
+  | BTYP_compacttuple of t list
   | BTYP_array of t * t
+  | BTYP_compactarray of t * t
   | BTYP_rptsum of t * t
+  | BTYP_compactrptsum of t * t
   | BTYP_record of (string * t) list
   | BTYP_polyrecord of (string * t) list * string * t
   | BTYP_variant of (string * t) list
@@ -37,6 +43,8 @@ and t = private
 
   | BTYP_function of t * t
   | BTYP_effector of t * t * t
+  | BTYP_linearfunction of t * t
+  | BTYP_lineareffector of t * t * t
   | BTYP_cfunction of t * t
   | BTYP_void
   | BTYP_label
@@ -106,7 +114,8 @@ type biface_t =
   | BIFACE_export_union of Flx_srcref.t * bid_t * string
   | BIFACE_export_requirement of Flx_srcref.t * breqs_t
 val complete_type : t -> bool
-val btyp_hole : t
+val btyp_instancetype: Flx_srcref.t -> t
+val btyp_ellipsis : t
 val btyp_label : unit -> t
 val btyp_none : unit -> t
 val btyp_int : unit -> t
@@ -115,16 +124,21 @@ val btyp_unit : unit -> t
 val btyp_bool : unit -> t
 val btyp_any : unit -> t
 val btyp_sum : t list -> t
+val btyp_compactsum : t list -> t
 val btyp_unitsum : int -> t
 val btyp_inst : bid_t * t list * kind -> t
 val btyp_vinst : bid_t * t list * kind -> t
+val btyp_intersect : t list -> t
 val btyp_tuple : t list -> t
+val btyp_compacttuple : t list -> t
 val btyp_rev : t -> t
 val btyp_uniq : t -> t
 val btyp_tuple_cons : t -> t -> t
 val btyp_tuple_snoc : t -> t -> t
 val btyp_array : t * t -> t
+val btyp_compactarray : t * t -> t
 val btyp_rptsum : t * t -> t
+val btyp_compactrptsum : t * t -> t
 val btyp_record : (string * t) list -> t
 val btyp_polyrecord : (string * t) list -> string -> t -> t
 val btyp_variant : (string * t) list -> t
@@ -143,9 +157,10 @@ val btyp_cltwref : t -> t -> t
 
 val btyp_function : t * t -> t
 val btyp_effector : t * t * t -> t
+val btyp_linearfunction : t * t -> t
+val btyp_lineareffector : t * t * t -> t
 val btyp_cfunction : t * t -> t
 val btyp_fix : int -> kind -> t
-val btyp_type : int -> kind
 val btyp_type_tuple : t list -> t
 val btyp_type_function : (bid_t * kind) list * kind * t -> t
 val btyp_type_var : bid_t * kind -> t
@@ -172,7 +187,8 @@ val all_units : t list -> bool
 val is_unitsum : t -> bool
 val ipow : int -> int -> int
 val int_of_linear_type : 'a -> t -> int
-val islinear_type : 'a -> t -> bool
+val islinear_type : t -> bool
+val iscopyable_type : t -> bool
 val sizeof_linear_type : 'a -> t -> int
 val iscompact_linear_product: t -> bool
 val ncases_of_sum : 'a -> t -> int

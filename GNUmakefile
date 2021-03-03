@@ -156,6 +156,11 @@ grammar:
 
 extract: packages grammar
 
+fextract:
+	flx_iscr ${PWD}/src/packages "--regex=.*\\.fdoc" build/release
+	flx_find_grammar_files
+
+
 bootstrap-tools:
 	# =========================================================
 	# build tools required for rebuild.
@@ -182,7 +187,7 @@ gcc_macosx:
 		--target-bin=gcc_macosx --source-dir=${BUILDROOT}	\
 		--source-bin=host --clean-target-bin-dir --copy-compiler\
 	       	--configure --compiler=gcc --os=macosx --bits=64	\
-		--cxx-compiler=g++-8 --debug
+		--cxx-compiler=g++ --debug
 
 	# =========================================================
 	# build gcc rtl on macosx
@@ -359,6 +364,10 @@ install:
 	ln -s felix-${VERSION} ${INSTALLROOT}/felix-latest
 	ln -sfn ${INSTALLROOT}/felix-latest/host/* ${PREFIX}/host/
 	ln -sfn ${INSTALLROOT}/felix-latest/share/* ${PREFIX}/share/
+
+macosxfpcs:
+	build/release/host/bin/flx_build_prep --debug --target-dir=build/release --target-bin=host --configure --compiler=clang --os=macosx --bits=64
+
  
 .PHONY : test extras bootstrap configure packages grammar
 .PHONY : doc install websites-linux  release install-bin

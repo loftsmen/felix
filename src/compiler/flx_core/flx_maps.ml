@@ -11,15 +11,13 @@ let map_type f (t:typecode_t):typecode_t = match t with
   | `TYP_bool _ -> t 
   | `TYP_typeop (sr,op,t,k) -> `TYP_typeop (sr,op, f t, k)
   | `TYP_rptsum (i,t) -> `TYP_rptsum (f i, f t)
-  | `TYP_defer (sr,dt) -> 
-    begin match !dt with
-    | None -> t (* unmodified *)
-    | Some xt -> f xt  (* replace defered type completely *)
-    end
+  | `TYP_compactrptsum (i,t) -> `TYP_compactrptsum (f i, f t)
   | `TYP_name (sr,name,ts) -> `TYP_name (sr, name, List.map f ts)
   | `TYP_lookup (sr,(e,name,ts)) -> `TYP_lookup (sr, (e, name, List.map f ts))
   | `TYP_suffix (sr,(qn,t)) -> `TYP_suffix (sr, (qn, f t))
   | `TYP_tuple ts -> `TYP_tuple (List.map f ts)
+  | `TYP_intersect ts -> `TYP_intersect (List.map f ts)
+  | `TYP_compacttuple ts -> `TYP_compacttuple (List.map f ts)
   | `TYP_record ts -> `TYP_record (List.map (fun (s,t) -> s,f t) ts)
   | `TYP_polyrecord (ts,s,v) -> `TYP_polyrecord (List.map (fun (s,t) -> s,f t) ts, s, f v)
   | `TYP_variant ts -> `TYP_variant (List.map (
@@ -46,15 +44,19 @@ let map_type f (t:typecode_t):typecode_t = match t with
   (* here we don't need to go to a unitsum, since
      we have already used up storage
   *)
+  | `TYP_compactsum ts -> `TYP_compactsum (List.map f ts)
   | `TYP_sum ts -> `TYP_sum (List.map f ts)
   | `TYP_function (a,b) -> `TYP_function (f a, f b)
   | `TYP_effector (a,e,b) -> `TYP_effector (f a, f e, f b)
+  | `TYP_linearfunction (a,b) -> `TYP_linearfunction (f a, f b)
+  | `TYP_lineareffector (a,e,b) -> `TYP_lineareffector (f a, f e, f b)
   | `TYP_cfunction (a,b) -> `TYP_cfunction (f a, f b)
   | `TYP_pointer t -> `TYP_pointer (f t)
   | `TYP_rref t -> `TYP_rref (f t)
   | `TYP_wref t -> `TYP_wref (f t)
   | `TYP_uniq t -> `TYP_uniq (f t)
   | `TYP_array (t1, t2) -> `TYP_array (f t1, f t2)
+  | `TYP_compactarray (t1, t2) -> `TYP_compactarray (f t1, f t2)
   | `TYP_as (t,s) -> `TYP_as (f t,s)
 
   (* type sets *)
@@ -130,11 +132,13 @@ let full_map_expr fi ft fe (e:expr_t):expr_t = match e with
   | `EXPR_lookup (sr,(x,s,ts)) -> `EXPR_lookup (sr,(fe x, s, List.map ft ts))
   | `EXPR_apply (sr,(a,b)) -> `EXPR_apply (sr,(fe a, fe b))
   | `EXPR_tuple (sr,es) -> `EXPR_tuple (sr, List.map fe es)
+  | `EXPR_compacttuple (sr,es) -> `EXPR_compacttuple (sr, List.map fe es)
   | `EXPR_record (sr,es) -> `EXPR_record (sr, List.map (fun (s,e) -> s,fe e) es)
   | `EXPR_polyrecord (sr,es,e) -> `EXPR_polyrecord (sr, List.map (fun (s,e) -> s,fe e) es, fe e)
   | `EXPR_replace_fields (sr,e,ss) -> 
     `EXPR_replace_fields (sr, fe e, List.map (fun (s,e) -> s,fe e) ss)
   | `EXPR_remove_fields (sr,e,ss) -> `EXPR_remove_fields (sr, fe e, ss)
+  | `EXPR_getall_field (sr,e,s) -> `EXPR_getall_field (sr, fe e, s)
   | `EXPR_variant (sr,(s,e)) -> `EXPR_variant (sr, (s,fe e))
   | `EXPR_arrayof (sr, es) -> `EXPR_arrayof (sr, List.map fe es)
   | `EXPR_coercion (sr, (x,t)) -> `EXPR_coercion (sr,(fe x, ft t))
@@ -262,6 +266,7 @@ let iter_expr f (e:expr_t) =
   | `EXPR_get_tuple_body (_,x)
   | `EXPR_get_tuple_last (_,x)
   | `EXPR_remove_fields (_,x,_)
+  | `EXPR_getall_field (_,x,_)
   | `EXPR_uniq (_,x)
     -> f x
 
@@ -280,6 +285,7 @@ let iter_expr f (e:expr_t) =
     -> f a; f e; f b
 
   | `EXPR_tuple (_,es)
+  | `EXPR_compacttuple (_,es)
   | `EXPR_intersect (_,es)
   | `EXPR_union (_,es)
   | `EXPR_arrayof (_, es)

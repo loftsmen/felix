@@ -1,0 +1,110 @@
+include "std/apple/Foundation";
+
+open syntax ObjC;
+
+// This is required at the moment to declare the class 
+header small_class_interface = c"""
+@interface SmallClass: NSObject { 
+  int z;
+  int q;
+@public
+  int x; int y;
+}
+- (int)get1977;
+- (instancetype)cpy;
+- (instancetype)cpywithmsg:(NSString*)p;
+@end
+""";
+
+body small_class_implementation = c"""
+@implementation SmallClass
+- (instancetype)init {
+	self = [super init];
+  self->x = 42;
+  self->y = 98;
+  self->z = 104;
+  self->q = 33;
+	return self;
+}
+- (int)get1977 {
+	return 1977;
+}
+- (int)getsum: (int)toadd {
+  return 1977 + toadd;
+}
+-(int)z { return z; }
+-(int)q { return q; }
+-(void)setz:(int)v { self->z=v; }
+-(NSString*)description { return @"SmallClassInstance"; }
+-(instancetype)cpy { return self; }
+-(instancetype)cpywithmsg:(NSString*)s { NSLog(s); return self; }
+@end
+""";
+
+// PROTOCOL
+
+objc-bind 
+  @protocol hasDescription
+   -(NSString)description;
+  @end
+  requires small_class_interface, small_class_implementation, package "foundation", package "objc"
+;
+
+objc-bind
+  @protocol Cpy
+  -(instancetype)cpy;
+  -(instancetype)cpywithmsg:(NSString);
+  @end
+;
+
+objc-bind 
+ @interface SmallClass<hasDescription, Cpy>
+  {
+     int x;
+     y: int;
+  }
+   +(SmallClass)alloc;
+   -(instancetype)init;
+   -(int)get1977;
+   -(int)getsum:(int);
+   @property int z;
+   @property (readonly) q:int;
+ @end
+ requires small_class_interface, small_class_implementation, package "foundation", package "objc"
+;
+
+var sc : SmallClass = #SmallClass'alloc.init;
+println$ "Get: " + (sc.get1977) . str ;
+println$ "Add: " + (sc.getsum' 42) . str ;
+
+fun require_subtype (x:NSObject) => (x.description).str;
+println$ sc.require_subtype;
+
+fun require_description(x:hasDescription) => (x.description).str;
+println$ sc.require_description;
+
+// ivars
+
+println$ sc->x, sc->y;
+sc . x <- 88;
+println$ sc->x, sc->y;
+
+// properties
+
+println$ "z=" + sc.z.str;
+println$ "q=" + sc.q.str;
+sc.setz' 44;
+// sc.setq' 44; // this should fail
+println$ "z=" + sc.z.str;
+
+// Covariance
+var sc2 : SmallClass = sc.cpy;
+println$ "sc2.z=" + sc2.z.str;
+var sc3 : SmallClass = sc.cpywithmsg' @"Copy with message";
+println$ "sc3.z=" + sc3.z.str;
+
+// Intersection
+noinline fun dc (x: hasDescription & Cpy) => x.cpy.description.str;
+println$ sc.dc;
+
+

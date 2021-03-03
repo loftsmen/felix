@@ -54,17 +54,32 @@ let rec get_offsets' syms bsym_table typ : offset_kind_t list =
   let tname = cpp_typename syms bsym_table typ in
   let t' = unfold "flx_cal_type_offsets: get_offsets" typ in
   match t' with
+  | BTYP_ellipsis -> assert false
   | BBOOL _ -> assert false
   | BTYP_typeop _ -> assert false
   | BTYP_typeof _ -> assert false
-  | BTYP_hole -> assert false
   | BTYP_rev _ -> assert false
   | BTYP_uniq _ -> assert false
+
+  | BTYP_instancetype _ ->
+    (* print_endline ("Cal_type_offsets: instancetype"); *)
+    (* this shouldn't happen but somehow it does .. *)
+    [`Ptr "0"]
+
   | BTYP_ptr (_,t,_) -> [`Ptr "0"]
 
 
   | BTYP_variant _ ->
     [`Ptr (offsetof tname "data")]
+  
+  (* compact linear *)
+  | BTYP_tuple [] 
+  | BTYP_compacttuple _
+  | BTYP_compactarray _
+  | BTYP_compactsum _
+  | BTYP_compactrptsum _
+  | BTYP_unitsum _ -> []
+
 
   (* need to fix the rule for optimisation here .. *)
   | BTYP_rptsum _ 
@@ -154,6 +169,23 @@ let rec get_offsets' syms bsym_table typ : offset_kind_t list =
       (nlist k)
     end
 
+  (* NOTES. This type really does exist at run time. Consider an ObjC protocol A & B,
+     them values of this type are ObjC class instances conforming to both A and B.
+     To correctly dispatch methods in the back end we should in principle use a C union
+     here with one component for A and one for B, and statically determine in Felix
+     which "cast" to use.
+
+    For now I am going to CHEAT and just assume that's the only case, so a void* representation
+    will do. The "casting" is necessary if the SAME ObjC selector is in both protocols,
+    then we have to pick which one we want by overloading. How do we do that? Well the CLIENT
+    has the same problem: its ambiguous. So THEY have to use a coercion of the pointer themselves
+    to either A or B, and we just propagate the coercion. The coercion throws out one of the
+    methods and forces the other to be selected. 
+  *)
+  | BTYP_intersect _ -> 
+    print_endline ("Flx_cal_type_offsets: HOT intersection type"); 
+    [`Ptr "0"]
+
   | BTYP_tuple args ->
     let n = ref 0 in
     let lst = ref [] in
@@ -183,11 +215,11 @@ let rec get_offsets' syms bsym_table typ : offset_kind_t list =
     ;
     !lst
 
+  | BTYP_lineareffector _ 
+  | BTYP_linearfunction _ -> [`Ptr "0"]
   | BTYP_effector _ 
   | BTYP_function _ -> [`Ptr "0"]
   | BTYP_cfunction _ -> []
-
-  | BTYP_unitsum _ -> []
 
   | BTYP_label -> [`Ptr "0"] (* see jump_address_t, target_frame at offset 0 *)
 

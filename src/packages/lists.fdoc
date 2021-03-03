@@ -71,7 +71,7 @@ or option iterator.
 You can also use the notation ([1,2,3]).
 @tangle list.flx
   //$ Make a list from an array.
-  ctor[T,N] list[T] (x:array[T, N]) = {
+  ctor[T,N:COMPACTLINEAR] list[T] (x:array[T, N]) = {
     var o = Empty[T];
     if x.len > 0uz do
       for var i in x.len.int - 1 downto 0 do
@@ -185,7 +185,10 @@ Primarily a helper.
   //$ Copy a list.
   fun copy[T] (x:list[T]):uniq list[T]=> rev (rev x);
   fun copy[T] (x:uniq list[T]):uniq list[T]=> x;
-  fun dup[T] (x:uniq list[T]):uniq list[T] * uniq list[T] => x, copy (unbox x);
+  fun dup[T] (x:uniq list[T]):uniq list[T] * uniq list[T] {
+     var y = unbox x;
+     return box y,copy y;
+  }
 
 
 @h2 Splice

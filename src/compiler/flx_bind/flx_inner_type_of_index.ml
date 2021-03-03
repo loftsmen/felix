@@ -44,7 +44,8 @@ if debug then
   if List.mem index rs.idx_fixlist then begin
 if debug then
 print_endline "inner_typeof+index returning fixpoint";
-    btyp_fix (-rs.depth) (btyp_type 0) 
+    (* btyp_fix (-rs.depth) (btyp_type 0) *)
+    btyp_fix (-rs.depth) (Flx_kind.kind_type) 
   end else
 
   let mkenv i = build_env state bsym_table (Some i) in
@@ -70,9 +71,13 @@ if index = 37461 then print_env env;
   match sym.Flx_sym.symdef with
   | SYMDEF_label s -> btyp_label ()
 
-  | SYMDEF_callback _ ->
-      print_endline "Inner type of index finds callback";
-      assert false
+  | SYMDEF_callback (props,ts_orig,ret,reqs) ->
+(* print_endline ("Inner type of index finds SYMDEF_callback"); *)
+    let client_data_pos, bret, ts_c, ts_cf, tc, tcf = 
+       Flx_callback.cal_callback_types bsym_table (bt sym.Flx_sym.sr) state.counter sym.Flx_sym.sr sym.Flx_sym.id ts_orig ret
+    in 
+    tcf 
+
   | SYMDEF_inherit qn ->
       failwith ("Woops inner_type_of_index found inherit " ^
         string_of_bid index)
@@ -136,8 +141,8 @@ print_endline ("** END **** Abnormal Exit Function type for function " ^ sym.Flx
       let d = bt sym.Flx_sym.sr ptyp in
       let e = bt sym.Flx_sym.sr effects in
       let ft = 
-        if List.mem `Cfun props
-        then btyp_cfunction (d, rt)
+        if List.mem `Cfun props then btyp_cfunction (d, rt)
+        else if List.mem `LinearFunction props then btyp_lineareffector (d, e, rt)
         else btyp_effector (d, e, rt)
       in
 (*
@@ -185,7 +190,21 @@ print_endline ("** FINISH **** Calculating Function type for function " ^ sym.Fl
       let ts = adjust_ts state.sym_table bsym_table sym.Flx_sym.sr index ts in
 (* print_endline "inner type of index .. struct .. adjust ts done"; *)
       let t = type_of_list (List.map snd ls) in
-      let mt = Flx_kind.KIND_type in
+
+      (* FIXME: why kind_type not kind_linear? Well ist hackery!  
+         Actually the vs already encode the kinds. We should actually
+         work out the kinds. But adjust_ts munges the list to take account
+         or parents, we can't include the kinds there, and afterwards we've
+         lost track of which ones are which. Its not right to make the kind of the struct
+         created LINEAR, because it might actually be TYPE, that is copyable, and if
+         we called it just LINEAR it couldn't be used polymorphically. Of course that's
+         correct if the struct does contain unique components. Unfortunately nominal types
+         can't be looked up early in the compiler where kinding calculations are done.
+
+         We have to come back to this, but for now, TYPE is statistically the best bet
+      *)
+
+      let mt = Flx_kind.kind_type in
       let result = btyp_function (bt sym.Flx_sym.sr t, btyp_inst (index, ts, mt)) in
 (*
 print_endline ("struct as function [inner_type_of_index] " ^ sbt bsym_table result);

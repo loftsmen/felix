@@ -162,30 +162,16 @@ let cal_bind_apply
       (* ---------------------------------------------------------- *)
       (* special case, name as record projection *)
       (* NOTE: this tries to handle projections of structs too *)
-      (* probably shouldn't. Also does Koenig lookup and other stuff *)
-      (* which might be obsolete now. *)
-      (* Koenig lookup allows a function f defined in the same class *)
-      (* as a struct X to be found as if it we a field name of the struct *)
-      (* without requiring a qualified name *) 
+      (* probably shouldn't.  *)
       (* ---------------------------------------------------------- *)
       try match f' with
       | `EXPR_name (sr, name, ts) ->
         Flx_bind_record_proj.try_bind_record_proj 
-          bsym_table state build_env koenig_lookup be bt env rs cal_apply bind_type' mkenv
+          bsym_table state build_env be bt env rs cal_apply bind_type' mkenv
           f' a' a sr name ts
-      | _ -> raise Flx_dot.OverloadResolutionError
-      with Flx_dot.OverloadResolutionError ->
+      | _ -> raise Flx_exceptions.TryNext
+      with Flx_exceptions.TryNext ->
    
-      (* NOW TRY DEFERED FUNCTION OVERLOADING *)
-      (* ALWAYS FAILS but can set a deferred type *)
-      try
-        Flx_bind_deferred.set_deferred_type  
-          bsym_table state env inner_lookup_name_in_env 
-          eval_module_expr get_pub_tables
-          rs 
-          sr f' a
-      with Flx_dot.OverloadResolutionError ->
-
       try
         Flx_bind_inline_projection.bind_inline_projection bsym_table be bt sr f' a' ta a  
       with Flx_exceptions.TryNext ->
@@ -203,13 +189,20 @@ let cal_bind_apply
           match Flx_typing2.qualified_name_of_expr f' with
           | Some name ->
 (*
+print_endline ("Checking if " ^ Flx_print.string_of_qualified_name name ^ " is a function");
 if match name with | `AST_name (_,"accumulate",_) -> true | _ -> false then begin
   print_endline "Trying to bind application of accumulate";
 end;
 *)
             let srn = src_of_qualified_name name in
             begin 
-              try  (lookup_qn_with_sig' state bsym_table sr srn env rs name (ta::sigs))
+              try  
+                 let result = (lookup_qn_with_sig' state bsym_table sr srn env rs name (ta::sigs)) in
+(*
+print_endline ("yes, got " ^ Flx_print.sbe bsym_table result);
+print_endline ("  WITH TYPE " ^ Flx_print.sbt bsym_table (snd result));
+*)
+                 result
               with 
               | Not_found -> failwith "lookup_qn_with_sig' threw Not_found"
               | exn -> raise exn 
@@ -222,15 +215,18 @@ end;
               | exn -> raise exn 
             end
         in
-        (*
-            print_endline ("Bound f = " ^ sbe bsym_table f);
-            print_endline ("tf=" ^ sbt bsym_table tf);
-            print_endline ("ta=" ^ sbt bsym_table ta);
-        *)
+(*
+            print_endline ("Bound f = " ^ Flx_print.sbe bsym_table f);
+            print_endline ("tf=" ^ Flx_print.sbt bsym_table tf);
+            print_endline ("ta=" ^ Flx_print.sbt bsym_table ta);
+*)
         begin match tf with
+        | BTYP_lineareffector _ 
         | BTYP_effector _ 
+        | BTYP_function _ 
+        | BTYP_linearfunction _
         | BTYP_cfunction _ 
-        | BTYP_function _ ->
+          ->
           begin try
 (*
            print_endline (" ** Bound LHS of application as function!");
@@ -247,7 +243,11 @@ end;
             raise exn
           end
         (* NOTE THIS CASE HASN'T BEEN CHECKED FOR POLYMORPHISM YET *)
-        | BTYP_inst (i,ts',_) when
+        | BTYP_inst (i,ts',_) ->
+(*
+          print_endline (" ** Bound LHS of application and a nominal type");
+*)
+          if 
           (
             match Flx_lookup_state.hfind "flx_bind_apply" state.Flx_lookup_state.sym_table i with
             | { Flx_sym.symdef=Flx_types.SYMDEF_struct _}
@@ -255,10 +255,19 @@ end;
               (match ta with | BTYP_record _ -> true | _ -> false)
             | _ -> false
           )
-          ->
-           Flx_struct_apply.cal_struct_apply 
-           bsym_table state bind_type' mkenv build_env cal_apply
-           rs sr f a i ts'
+          then begin 
+(*
+            print_endline (" ** a struct with a record argument");
+*)
+            Flx_struct_apply.cal_struct_apply_to_record
+            bsym_table state bind_type' mkenv build_env cal_apply
+            rs sr f a i ts'
+          end else begin
+(*
+            print_endline ("  ** Not a struct with a record argument");
+*)
+            raise Flx_dot.OverloadResolutionError
+          end
 
         | _ -> raise Flx_dot.OverloadResolutionError
         end (* tf *)
